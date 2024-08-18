@@ -1,20 +1,21 @@
-import pytest
 import time
 
-from griptape.artifacts import TextArtifact, ErrorArtifact
+import pytest
+
+from griptape.artifacts import ErrorArtifact, TextArtifact
+from griptape.memory.structure import ConversationMemory
 from griptape.memory.task.storage import TextArtifactStorage
 from griptape.rules import Rule, Ruleset
-from griptape.tokenizers import OpenAiTokenizer
-from griptape.tasks import PromptTask, BaseTask, ToolkitTask, CodeExecutionTask
-from griptape.memory.structure import ConversationMemory
-from tests.mocks.mock_prompt_driver import MockPromptDriver
 from griptape.structures import Pipeline
+from griptape.tasks import BaseTask, CodeExecutionTask, PromptTask, ToolkitTask
+from griptape.tokenizers import OpenAiTokenizer
+from tests.mocks.mock_prompt_driver import MockPromptDriver
 from tests.mocks.mock_tool.tool import MockTool
 from tests.unit.structures.test_agent import MockEmbeddingDriver
 
 
 class TestPipeline:
-    @pytest.fixture
+    @pytest.fixture()
     def waiting_task(self):
         def fn(task):
             time.sleep(2)
@@ -22,7 +23,7 @@ class TestPipeline:
 
         return CodeExecutionTask(run_fn=fn)
 
-    @pytest.fixture
+    @pytest.fixture()
     def error_artifact_task(self):
         def fn(task):
             return ErrorArtifact("error")
@@ -76,8 +77,8 @@ class TestPipeline:
         with pytest.raises(ValueError):
             Pipeline(rules=[Rule("foo test")], rulesets=[Ruleset("Bar", [Rule("bar test")])])
 
+        pipeline = Pipeline()
         with pytest.raises(ValueError):
-            pipeline = Pipeline()
             pipeline.add_task(PromptTask(rules=[Rule("foo test")], rulesets=[Ruleset("Bar", [Rule("bar test")])]))
 
     def test_with_no_task_memory(self):
@@ -389,3 +390,22 @@ class TestPipeline:
         pipeline.run()
 
         assert pipeline.output is not None
+
+    def test_add_duplicate_task(self):
+        task = PromptTask("test")
+        pipeline = Pipeline(prompt_driver=MockPromptDriver())
+
+        pipeline + task
+        pipeline + task
+
+        assert len(pipeline.tasks) == 1
+
+    def test_add_duplicate_task_directly(self):
+        task = PromptTask("test")
+        pipeline = Pipeline(prompt_driver=MockPromptDriver())
+
+        pipeline + task
+        pipeline.tasks.append(task)
+
+        with pytest.raises(ValueError, match=f"Duplicate task with id {task.id} found."):
+            pipeline.run()

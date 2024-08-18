@@ -19,14 +19,16 @@ class DuckDuckGoWebSearchDriver(BaseWebSearchDriver):
 
     def search(self, query: str, **kwargs) -> ListArtifact:
         try:
-            results = self.client.text(query, region=f"{self.language}-{self.country}", max_results=self.results_count)
+            results = self.client.text(
+                query, region=f"{self.language}-{self.country}", max_results=self.results_count, **kwargs
+            )
             return ListArtifact(
                 [
                     TextArtifact(
-                        json.dumps({"title": result["title"], "url": result["href"], "description": result["body"]})
+                        json.dumps({"title": result["title"], "url": result["href"], "description": result["body"]}),
                     )
                     for result in results
-                ]
+                ],
             )
         except Exception as e:
             raise Exception(f"Error searching '{query}' with DuckDuckGo: {e}") from e

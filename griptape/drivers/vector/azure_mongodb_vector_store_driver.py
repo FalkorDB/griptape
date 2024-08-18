@@ -14,6 +14,7 @@ class AzureMongoDbVectorStoreDriver(MongoDbAtlasVectorStoreDriver):
     def query(
         self,
         query: str,
+        *,
         count: Optional[int] = None,
         namespace: Optional[str] = None,
         include_vectors: bool = False,
@@ -29,8 +30,8 @@ class AzureMongoDbVectorStoreDriver(MongoDbAtlasVectorStoreDriver):
         # Using the embedding driver to convert the query string into a vector
         vector = self.embedding_driver.embed_string(query)
 
-        count = count if count else BaseVectorStoreDriver.DEFAULT_QUERY_COUNT
-        offset = offset if offset else 0
+        count = count or BaseVectorStoreDriver.DEFAULT_QUERY_COUNT
+        offset = offset or 0
 
         pipeline = []
 
@@ -43,8 +44,8 @@ class AzureMongoDbVectorStoreDriver(MongoDbAtlasVectorStoreDriver):
                         "k": min(count * self.num_candidates_multiplier, self.MAX_NUM_CANDIDATES),
                     },
                     "returnStoredSource": True,
-                }
-            }
+                },
+            },
         )
 
         if namespace:

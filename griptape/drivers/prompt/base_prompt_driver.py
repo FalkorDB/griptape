@@ -14,14 +14,14 @@ from griptape.common import (
     PromptStack,
     TextDeltaMessageContent,
     TextMessageContent,
+    observable,
 )
-from griptape.events import CompletionChunkEvent, FinishPromptEvent, StartPromptEvent
+from griptape.events import CompletionChunkEvent, FinishPromptEvent, StartPromptEvent, event_bus
 from griptape.mixins import ExponentialBackoffMixin, SerializableMixin
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from griptape.structures import Structure
     from griptape.tokenizers import BaseTokenizer
 
 
@@ -32,7 +32,6 @@ class BasePromptDriver(SerializableMixin, ExponentialBackoffMixin, ABC):
     Attributes:
         temperature: The temperature to use for the completion.
         max_tokens: The maximum number of tokens to generate. If not specified, the value will be automatically generated based by the tokenizer.
-        structure: An optional `Structure` to publish events to.
         prompt_stack_to_string: A function that converts a `PromptStack` to a string.
         ignored_exception_types: A tuple of exception types to ignore.
         model: The model name.
@@ -43,7 +42,6 @@ class BasePromptDriver(SerializableMixin, ExponentialBackoffMixin, ABC):
 
     temperature: float = field(default=0.1, metadata={"serializable": True})
     max_tokens: Optional[int] = field(default=None, metadata={"serializable": True})
-    structure: Optional[Structure] = field(default=None)
     ignored_exception_types: tuple[type[Exception], ...] = field(default=Factory(lambda: (ImportError, ValueError)))
     model: str = field(metadata={"serializable": True})
     tokenizer: BaseTokenizer
@@ -51,20 +49,19 @@ class BasePromptDriver(SerializableMixin, ExponentialBackoffMixin, ABC):
     use_native_tools: bool = field(default=False, kw_only=True, metadata={"serializable": True})
 
     def before_run(self, prompt_stack: PromptStack) -> None:
-        if self.structure:
-            self.structure.publish_event(StartPromptEvent(model=self.model, prompt_stack=prompt_stack))
+        event_bus.publish_event(StartPromptEvent(model=self.model, prompt_stack=prompt_stack))
 
     def after_run(self, result: Message) -> None:
-        if self.structure:
-            self.structure.publish_event(
-                FinishPromptEvent(
-                    model=self.model,
-                    result=result.value,
-                    input_token_count=result.usage.input_tokens,
-                    output_token_count=result.usage.output_tokens,
-                )
-            )
+        event_bus.publish_event(
+            FinishPromptEvent(
+                model=self.model,
+                result=result.value,
+                input_token_count=result.usage.input_tokens,
+                output_token_count=result.usage.output_tokens,
+            ),
+        )
 
+    @observable(tags=["PromptDriver.run()"])
     def run(self, prompt_stack: PromptStack) -> Message:
         for attempt in self.retrying():
             with attempt:
@@ -131,19 +128,21 @@ class BasePromptDriver(SerializableMixin, ExponentialBackoffMixin, ABC):
                 else:
                     delta_contents[content.index] = [content]
                 if isinstance(content, TextDeltaMessageContent):
-                    self.structure.publish_event(CompletionChunkEvent(token=content.text))
+                    event_bus.publish_event(CompletionChunkEvent(token=content.text))
                 elif isinstance(content, ActionCallDeltaMessageContent):
                     if content.tag is not None and content.name is not None and content.path is not None:
-                        self.structure.publish_event(CompletionChunkEvent(token=str(content)))
+                        event_bus.publish_event(CompletionChunkEvent(token=str(content)))
                     elif content.partial_input is not None:
-                        self.structure.publish_event(CompletionChunkEvent(token=content.partial_input))
+                        event_bus.publish_event(CompletionChunkEvent(token=content.partial_input))
 
         # Build a complete content from the content deltas
         result = self.__build_message(list(delta_contents.values()), usage)
 
         return result
 
-    def __build_message(self, delta_contents: list[list[BaseDeltaMessageContent]], usage: DeltaMessage.Usage):
+    def __build_message(
+        self, delta_contents: list[list[BaseDeltaMessageContent]], usage: DeltaMessage.Usage
+    ) -> Message:
         content = []
         for delta_content in delta_contents:
             text_deltas = [delta for delta in delta_content if isinstance(delta, TextDeltaMessageContent)]

@@ -27,6 +27,7 @@ from griptape.common import (
     TextDeltaMessageContent,
     TextMessageContent,
     ToolAction,
+    observable,
 )
 from griptape.drivers import BasePromptDriver
 from griptape.tokenizers import AnthropicTokenizer, BaseTokenizer
@@ -55,12 +56,14 @@ class AnthropicPromptDriver(BasePromptDriver):
     model: str = field(kw_only=True, metadata={"serializable": True})
     client: Client = field(
         default=Factory(
-            lambda self: import_optional_dependency("anthropic").Anthropic(api_key=self.api_key), takes_self=True
+            lambda self: import_optional_dependency("anthropic").Anthropic(api_key=self.api_key),
+            takes_self=True,
         ),
         kw_only=True,
     )
     tokenizer: BaseTokenizer = field(
-        default=Factory(lambda self: AnthropicTokenizer(model=self.model), takes_self=True), kw_only=True
+        default=Factory(lambda self: AnthropicTokenizer(model=self.model), takes_self=True),
+        kw_only=True,
     )
     top_p: float = field(default=0.999, kw_only=True, metadata={"serializable": True})
     top_k: int = field(default=250, kw_only=True, metadata={"serializable": True})
@@ -68,6 +71,7 @@ class AnthropicPromptDriver(BasePromptDriver):
     use_native_tools: bool = field(default=True, kw_only=True, metadata={"serializable": True})
     max_tokens: int = field(default=1000, kw_only=True, metadata={"serializable": True})
 
+    @observable
     def try_run(self, prompt_stack: PromptStack) -> Message:
         response = self.client.messages.create(**self._base_params(prompt_stack))
 
@@ -77,6 +81,7 @@ class AnthropicPromptDriver(BasePromptDriver):
             usage=Message.Usage(input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens),
         )
 
+    @observable
     def try_stream(self, prompt_stack: PromptStack) -> Iterator[DeltaMessage]:
         events = self.client.messages.create(**self._base_params(prompt_stack), stream=True)
 
@@ -189,14 +194,15 @@ class AnthropicPromptDriver(BasePromptDriver):
 
             return ActionCallMessageContent(
                 artifact=ActionArtifact(
-                    value=ToolAction(tag=content.id, name=name, path=path, input=content.input)  # pyright: ignore[reportArgumentType]
-                )
+                    value=ToolAction(tag=content.id, name=name, path=path, input=content.input),  # pyright: ignore[reportArgumentType]
+                ),
             )
         else:
             raise ValueError(f"Unsupported message content type: {content.type}")
 
     def __to_prompt_stack_delta_message_content(
-        self, event: ContentBlockDeltaEvent | ContentBlockStartEvent
+        self,
+        event: ContentBlockDeltaEvent | ContentBlockStartEvent,
     ) -> BaseDeltaMessageContent:
         if event.type == "content_block_start":
             content_block = event.content_block

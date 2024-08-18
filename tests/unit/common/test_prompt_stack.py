@@ -1,13 +1,19 @@
 import pytest
 
-from griptape.artifacts import ImageArtifact, ListArtifact, TextArtifact, ActionArtifact
-from griptape.common import ImageMessageContent, PromptStack, TextMessageContent
-from griptape.common import ActionCallMessageContent
-from griptape.common import ActionResultMessageContent, ToolAction
+from griptape.artifacts import ActionArtifact, GenericArtifact, ImageArtifact, ListArtifact, TextArtifact
+from griptape.common import (
+    ActionCallMessageContent,
+    ActionResultMessageContent,
+    GenericMessageContent,
+    ImageMessageContent,
+    PromptStack,
+    TextMessageContent,
+    ToolAction,
+)
 
 
 class TestPromptStack:
-    @pytest.fixture
+    @pytest.fixture()
     def prompt_stack(self):
         return PromptStack()
 
@@ -32,6 +38,10 @@ class TestPromptStack:
                     ActionArtifact(ToolAction(tag="foo", name="bar", path="baz", input={}, output=TextArtifact("qux"))),
                 ]
             ),
+            "role",
+        )
+        prompt_stack.add_message(
+            GenericArtifact("foo"),
             "role",
         )
 
@@ -70,6 +80,10 @@ class TestPromptStack:
         assert prompt_stack.messages[5].content[0].artifact.value == "foo"
         assert isinstance(prompt_stack.messages[5].content[1], ActionResultMessageContent)
         assert prompt_stack.messages[5].content[1].artifact.value == "qux"
+
+        assert prompt_stack.messages[6].role == "role"
+        assert isinstance(prompt_stack.messages[6].content[0], GenericMessageContent)
+        assert prompt_stack.messages[6].content[0].artifact.value == "foo"
 
     def test_add_system_message(self, prompt_stack):
         prompt_stack.add_system_message("foo")

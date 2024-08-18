@@ -1,12 +1,13 @@
-from griptape.artifacts import ImageArtifact, ListArtifact
-from griptape.artifacts import TextArtifact, ActionArtifact
-from griptape.drivers import OpenAiChatPromptDriver
-from griptape.common import PromptStack, TextDeltaMessageContent, ActionCallDeltaMessageContent, ToolAction
-from griptape.tokenizers import OpenAiTokenizer
 from unittest.mock import Mock
+
+import pytest
+
+from griptape.artifacts import ActionArtifact, ImageArtifact, ListArtifact, TextArtifact
+from griptape.common import ActionCallDeltaMessageContent, PromptStack, TextDeltaMessageContent, ToolAction
+from griptape.drivers import OpenAiChatPromptDriver
+from griptape.tokenizers import OpenAiTokenizer
 from tests.mocks.mock_tokenizer import MockTokenizer
 from tests.mocks.mock_tool.tool import MockTool
-import pytest
 
 
 class TestOpenAiChatPromptDriverFixtureMixin:
@@ -22,6 +23,7 @@ class TestOpenAiChatPromptDriverFixtureMixin:
                     "properties": {
                         "values": {
                             "additionalProperties": False,
+                            "description": "Test input",
                             "properties": {"test": {"type": "string"}},
                             "required": ["test"],
                             "type": "object",
@@ -44,6 +46,7 @@ class TestOpenAiChatPromptDriverFixtureMixin:
                     "properties": {
                         "values": {
                             "additionalProperties": False,
+                            "description": "Test input",
                             "properties": {"test": {"type": "string"}},
                             "required": ["test"],
                             "type": "object",
@@ -66,6 +69,7 @@ class TestOpenAiChatPromptDriverFixtureMixin:
                     "properties": {
                         "values": {
                             "additionalProperties": False,
+                            "description": "Test input",
                             "properties": {"test": {"type": "string"}},
                             "required": ["test"],
                             "type": "object",
@@ -118,6 +122,7 @@ class TestOpenAiChatPromptDriverFixtureMixin:
                     "properties": {
                         "values": {
                             "additionalProperties": False,
+                            "description": "Test input",
                             "properties": {"test": {"type": "string"}},
                             "required": ["test"],
                             "type": "object",
@@ -140,6 +145,7 @@ class TestOpenAiChatPromptDriverFixtureMixin:
                     "properties": {
                         "values": {
                             "additionalProperties": False,
+                            "description": "Test input",
                             "properties": {"test": {"type": "string"}},
                             "required": ["test"],
                             "type": "object",
@@ -153,7 +159,7 @@ class TestOpenAiChatPromptDriverFixtureMixin:
         },
     ]
 
-    @pytest.fixture
+    @pytest.fixture()
     def mock_chat_completion_create(self, mocker):
         mock_chat_create = mocker.patch("openai.OpenAI").return_value.chat.completions.create
         mock_function = Mock(arguments='{"foo": "bar"}', id="mock-id")
@@ -168,7 +174,7 @@ class TestOpenAiChatPromptDriverFixtureMixin:
 
         return mock_chat_create
 
-    @pytest.fixture
+    @pytest.fixture()
     def mock_chat_completion_stream_create(self, mocker):
         mock_chat_create = mocker.patch("openai.OpenAI").return_value.chat.completions.create
         mock_tool_call_delta_header = Mock()
@@ -206,7 +212,7 @@ class TestOpenAiChatPromptDriverFixtureMixin:
         )
         return mock_chat_create
 
-    @pytest.fixture
+    @pytest.fixture()
     def prompt_stack(self):
         prompt_stack = PromptStack()
         prompt_stack.tools = [MockTool()]
@@ -244,7 +250,7 @@ class TestOpenAiChatPromptDriverFixtureMixin:
         )
         return prompt_stack
 
-    @pytest.fixture
+    @pytest.fixture()
     def messages(self):
         return [
             {"role": "system", "content": "system-input"},
@@ -269,6 +275,7 @@ class TestOpenAiChatPromptDriverFixtureMixin:
                 ],
             },
             {"content": "tool-output", "role": "tool", "tool_call_id": "MockTool_test"},
+            {"content": "keep-going", "role": "user"},
         ]
 
 
@@ -283,7 +290,7 @@ class OpenAiApiResponseWithHeaders:
         remaining_tokens=234,
         limit_requests=345,
         limit_tokens=456,
-    ):
+    ) -> None:
         self.reset_requests_in = reset_requests_in
         self.reset_requests_in_unit = reset_requests_in_unit
         self.reset_tokens_in = reset_tokens_in

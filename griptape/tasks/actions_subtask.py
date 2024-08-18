@@ -10,7 +10,7 @@ from attrs import define, field
 from griptape import utils
 from griptape.artifacts import ActionArtifact, BaseArtifact, ErrorArtifact, ListArtifact, TextArtifact
 from griptape.common import ToolAction
-from griptape.events import FinishActionsSubtaskEvent, StartActionsSubtaskEvent
+from griptape.events import FinishActionsSubtaskEvent, StartActionsSubtaskEvent, event_bus
 from griptape.mixins import ActionsSubtaskOriginMixin
 from griptape.tasks import BaseTask
 from griptape.utils import remove_null_values_in_dict_recursively
@@ -64,7 +64,19 @@ class ActionsSubtask(BaseTask):
         else:
             raise Exception("ActionSubtask must be attached to a Task that implements ActionSubtaskOriginMixin.")
 
-    def attach_to(self, parent_task: BaseTask):
+    def add_child(self, child: str | BaseTask) -> None:
+        child_id = child if isinstance(child, str) else child.id
+
+        if child_id not in self.child_ids:
+            self.child_ids.append(child_id)
+
+    def add_parent(self, parent: str | BaseTask) -> None:
+        parent_id = parent if isinstance(parent, str) else parent.id
+
+        if parent_id not in self.parent_ids:
+            self.parent_ids.append(parent_id)
+
+    def attach_to(self, parent_task: BaseTask) -> None:
         self.parent_task_id = parent_task.id
         self.structure = parent_task.structure
 
@@ -74,12 +86,12 @@ class ActionsSubtask(BaseTask):
             else:
                 self.__init_from_artifacts(self.input)
         except Exception as e:
-            self.structure.logger.error(f"Subtask {self.origin_task.id}\nError parsing tool action: {e}")
+            self.structure.logger.error("Subtask %s\nError parsing tool action: %s", self.origin_task.id, e)
 
             self.output = ErrorArtifact(f"ToolAction input parsing error: {e}", exception=e)
 
     def before_run(self) -> None:
-        self.structure.publish_event(
+        event_bus.publish_event(
             StartActionsSubtaskEvent(
                 task_id=self.id,
                 task_parent_ids=self.parent_ids,
@@ -89,7 +101,7 @@ class ActionsSubtask(BaseTask):
                 subtask_parent_task_id=self.parent_task_id,
                 subtask_thought=self.thought,
                 subtask_actions=self.actions_to_dicts(),
-            )
+            ),
         )
 
         parts = [
@@ -116,7 +128,7 @@ class ActionsSubtask(BaseTask):
                     actions_output.append(output)
                 self.output = ListArtifact(actions_output)
         except Exception as e:
-            self.structure.logger.error(f"Subtask {self.id}\n{e}", exc_info=True)
+            self.structure.logger.exception("Subtask %s\n%s", self.id, e)
 
             self.output = ErrorArtifact(str(e), exception=e)
         if self.output is not None:
@@ -128,7 +140,7 @@ class ActionsSubtask(BaseTask):
         with self.futures_executor_fn() as executor:
             results = utils.execute_futures_dict({a.tag: executor.submit(self.execute_action, a) for a in actions})
 
-        return [r for r in results.values()]
+        return list(results.values())
 
     def execute_action(self, action: ToolAction) -> tuple[str, BaseArtifact]:
         if action.tool is not None:
@@ -145,7 +157,7 @@ class ActionsSubtask(BaseTask):
     def after_run(self) -> None:
         response = self.output.to_text() if isinstance(self.output, BaseArtifact) else str(self.output)
 
-        self.structure.publish_event(
+        event_bus.publish_event(
             FinishActionsSubtaskEvent(
                 task_id=self.id,
                 task_parent_ids=self.parent_ids,
@@ -155,9 +167,9 @@ class ActionsSubtask(BaseTask):
                 subtask_parent_task_id=self.parent_task_id,
                 subtask_thought=self.thought,
                 subtask_actions=self.actions_to_dicts(),
-            )
+            ),
         )
-        self.structure.logger.info(f"Subtask {self.id}\nResponse: {response}")
+        self.structure.logger.info("Subtask %s\nResponse: %s", self.id, response)
 
     def actions_to_dicts(self) -> list[dict]:
         json_list = []
@@ -185,7 +197,8 @@ class ActionsSubtask(BaseTask):
         return json.dumps(self.actions_to_dicts(), indent=2)
 
     def _process_task_input(
-        self, task_input: str | tuple | list | BaseArtifact | Callable[[BaseTask], BaseArtifact]
+        self,
+        task_input: str | tuple | list | BaseArtifact | Callable[[BaseTask], BaseArtifact],
     ) -> TextArtifact | ListArtifact:
         if isinstance(task_input, (TextArtifact, ListArtifact)):
             return task_input
@@ -244,7 +257,7 @@ class ActionsSubtask(BaseTask):
 
             self.actions = [self.__process_action_object(action_object) for action_object in actions_list]
         except json.JSONDecodeError as e:
-            self.structure.logger.error(f"Subtask {self.origin_task.id}\nInvalid actions JSON: {e}")
+            self.structure.logger.exception("Subtask %s\nInvalid actions JSON: %s", self.origin_task.id, e)
 
             self.output = ErrorArtifact(f"Actions JSON decoding error: {e}", exception=e)
 
@@ -301,10 +314,10 @@ class ActionsSubtask(BaseTask):
             if activity_schema:
                 activity_schema.validate(action.input)
         except schema.SchemaError as e:
-            self.structure.logger.error(f"Subtask {self.origin_task.id}\nInvalid action JSON: {e}")
+            self.structure.logger.exception("Subtask %s\nInvalid action JSON: %s", self.origin_task.id, e)
 
             action.output = ErrorArtifact(f"Activity input JSON validation error: {e}", exception=e)
         except SyntaxError as e:
-            self.structure.logger.error(f"Subtask {self.origin_task.id}\nSyntax error: {e}")
+            self.structure.logger.exception("Subtask %s\nSyntax error: %s", self.origin_task.id, e)
 
             action.output = ErrorArtifact(f"Syntax error: {e}", exception=e)

@@ -1,21 +1,30 @@
 from __future__ import annotations
 
 import inspect
+from copy import deepcopy
 from typing import Callable, Optional
 
-import schema
-from attrs import define, field
+from attrs import Attribute, define, field
 from jinja2 import Template
-from schema import Literal, Schema
+from schema import Schema
 
 
 @define(slots=False)
 class ActivityMixin:
+    """Provides Tool Activity management functionality to Tools.
+
+    Attributes:
+        allowlist: List of Tool Activities to include in the Tool schema.
+        denylist: List of Tool Activities to remove from the Tool schema.
+        extra_schema_properties: Mapping of Activity name and extra properties to include in the activity's schema.
+    """
+
     allowlist: Optional[list[str]] = field(default=None, kw_only=True)
     denylist: Optional[list[str]] = field(default=None, kw_only=True)
+    extra_schema_properties: Optional[dict[str, dict]] = field(default=None, kw_only=True)
 
     @allowlist.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_allowlist(self, _, allowlist: Optional[list[str]]) -> None:
+    def validate_allowlist(self, _: Attribute, allowlist: Optional[list[str]]) -> None:
         if allowlist is None:
             return
 
@@ -26,7 +35,7 @@ class ActivityMixin:
             self._validate_tool_activity(activity_name)
 
     @denylist.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_denylist(self, _, denylist: Optional[list[str]]) -> None:
+    def validate_denylist(self, _: Attribute, denylist: Optional[list[str]]) -> None:
         if denylist is None:
             return
 
@@ -80,22 +89,19 @@ class ActivityMixin:
     def activity_schema(self, activity: Callable) -> Optional[Schema]:
         if activity is None or not getattr(activity, "is_activity", False):
             raise Exception("This method is not an activity.")
-        elif getattr(activity, "config")["schema"]:
-            full_schema = {
-                "values": getattr(activity, "config")["schema"].schema if getattr(activity, "config")["schema"] else {}
-            }
+        elif getattr(activity, "config")["schema"] is not None:
+            # Need to deepcopy to avoid modifying the original schema
+            config_schema = deepcopy(getattr(activity, "config")["schema"])
+            activity_name = self.activity_name(activity)
 
-            return Schema(full_schema)
+            if self.extra_schema_properties is not None and activity_name in self.extra_schema_properties:
+                config_schema.schema.update(self.extra_schema_properties[activity_name])
+
+            return Schema({"values": config_schema})
         else:
             return None
 
-    def activity_to_input(self, activity: Callable) -> dict:
-        if self.activity_schema(activity):
-            return {Literal("input"): {"values": getattr(activity, "config")["schema"]}}
-        else:
-            return {schema.Optional("input"): {}}
-
-    def _validate_tool_activity(self, activity_name):
+    def _validate_tool_activity(self, activity_name: str) -> None:
         tool = self.__class__
 
         activity = getattr(tool, activity_name, None)

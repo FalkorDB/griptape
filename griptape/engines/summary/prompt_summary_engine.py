@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional, cast
 
-from attrs import Factory, define, field
+from attrs import Attribute, Factory, define, field
 
 from griptape.artifacts import ListArtifact, TextArtifact
 from griptape.chunkers import BaseChunker, TextChunker
@@ -32,7 +32,7 @@ class PromptSummaryEngine(BaseSummaryEngine):
     )
 
     @max_token_multiplier.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_allowlist(self, _, max_token_multiplier: int) -> None:
+    def validate_allowlist(self, _: Attribute, max_token_multiplier: int) -> None:
         if max_token_multiplier > 1:
             raise ValueError("has to be less than or equal to 1")
         elif max_token_multiplier <= 0:
@@ -46,19 +46,23 @@ class PromptSummaryEngine(BaseSummaryEngine):
     def min_response_tokens(self) -> int:
         return round(
             self.prompt_driver.tokenizer.max_input_tokens
-            - self.prompt_driver.tokenizer.max_input_tokens * self.max_token_multiplier
+            - self.prompt_driver.tokenizer.max_input_tokens * self.max_token_multiplier,
         )
 
     def summarize_artifacts(self, artifacts: ListArtifact, *, rulesets: Optional[list[Ruleset]] = None) -> TextArtifact:
         return self.summarize_artifacts_rec(cast(list[TextArtifact], artifacts.value), None, rulesets=rulesets)
 
     def summarize_artifacts_rec(
-        self, artifacts: list[TextArtifact], summary: Optional[str] = None, rulesets: Optional[list[Ruleset]] = None
+        self,
+        artifacts: list[TextArtifact],
+        summary: Optional[str] = None,
+        rulesets: Optional[list[Ruleset]] = None,
     ) -> TextArtifact:
         artifacts_text = self.chunk_joiner.join([a.to_text() for a in artifacts])
 
         system_prompt = self.system_template_generator.render(
-            summary=summary, rulesets=J2("rulesets/rulesets.j2").render(rulesets=rulesets)
+            summary=summary,
+            rulesets=J2("rulesets/rulesets.j2").render(rulesets=rulesets),
         )
 
         user_prompt = self.user_template_generator.render(text=artifacts_text)
@@ -72,8 +76,8 @@ class PromptSummaryEngine(BaseSummaryEngine):
                     messages=[
                         Message(system_prompt, role=Message.SYSTEM_ROLE),
                         Message(user_prompt, role=Message.USER_ROLE),
-                    ]
-                )
+                    ],
+                ),
             ).to_artifact()
 
             if isinstance(result, TextArtifact):
@@ -92,8 +96,8 @@ class PromptSummaryEngine(BaseSummaryEngine):
                         messages=[
                             Message(system_prompt, role=Message.SYSTEM_ROLE),
                             Message(partial_text, role=Message.USER_ROLE),
-                        ]
-                    )
+                        ],
+                    ),
                 ).value,
                 rulesets=rulesets,
             )

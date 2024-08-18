@@ -35,7 +35,7 @@ class BaseFileManagerDriver(ABC):
                 "gif": loaders.ImageLoader(),
                 "bmp": loaders.ImageLoader(),
                 "tiff": loaders.ImageLoader(),
-            }
+            },
         ),
         kw_only=True,
     )
@@ -43,7 +43,7 @@ class BaseFileManagerDriver(ABC):
     def list_files(self, path: str) -> TextArtifact | ErrorArtifact:
         try:
             entries = self.try_list_files(path)
-            return TextArtifact("\n".join([e for e in entries]))
+            return TextArtifact("\n".join(list(entries)))
         except FileNotFoundError:
             return ErrorArtifact("Path not found")
         except NotADirectoryError:
@@ -97,4 +97,4 @@ class BaseFileManagerDriver(ABC):
             return ErrorArtifact(f"Failed to save file: {str(e)}")
 
     @abstractmethod
-    def try_save_file(self, path: str, value: bytes): ...
+    def try_save_file(self, path: str, value: bytes) -> None: ...

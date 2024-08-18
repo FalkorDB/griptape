@@ -15,25 +15,27 @@ if TYPE_CHECKING:
 
 @define
 class WebSearch(BaseTool):
-    web_search_driver: BaseWebSearchDriver = field(default=None, kw_only=True)
+    web_search_driver: BaseWebSearchDriver = field(kw_only=True)
 
     @activity(
         config={
-            "description": "Can be used for searching the web",
+            "description": "Can be used for searching the web via the {{ _self.web_search_driver.__class__.__name__}}.",
             "schema": Schema(
                 {
                     Literal(
                         "query",
                         description="Search engine request that returns a list of pages with titles, descriptions, and URLs",
-                    ): str
-                }
+                    ): str,
+                },
             ),
-        }
+        },
     )
     def search(self, props: dict) -> ListArtifact | ErrorArtifact:
-        query = props["values"]["query"]
+        values = props["values"]
+        query = values["query"]
+        extra_keys = {k: values[k] for k in values.keys() - {"query"}}
 
         try:
-            return self.web_search_driver.search(query)
+            return self.web_search_driver.search(query, **extra_keys)
         except Exception as e:
             return ErrorArtifact(f"Error searching '{query}' with {self.web_search_driver.__class__.__name__}: {e}")

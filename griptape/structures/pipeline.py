@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from attrs import define
 
 from griptape.artifacts import ErrorArtifact
+from griptape.common import observable
 from griptape.memory.structure import Run
 from griptape.structures import Structure
 
@@ -15,6 +16,9 @@ if TYPE_CHECKING:
 @define
 class Pipeline(Structure):
     def add_task(self, task: BaseTask) -> BaseTask:
+        if (existing_task := self.try_find_task(task.id)) is not None:
+            return existing_task
+
         task.preprocess(self)
 
         if self.output_task:
@@ -45,6 +49,7 @@ class Pipeline(Structure):
 
         return task
 
+    @observable
     def try_run(self, *args) -> Pipeline:
         self.__run_from_task(self.input_task)
 
@@ -63,7 +68,7 @@ class Pipeline(Structure):
                 "parent_output": task.parents[0].output.to_text() if task.parents and task.parents[0].output else None,
                 "parent": task.parents[0] if task.parents else None,
                 "child": task.children[0] if task.children else None,
-            }
+            },
         )
 
         return context

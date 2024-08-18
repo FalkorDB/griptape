@@ -1,10 +1,12 @@
 import inspect
 import os
+
 import pytest
 import yaml
-from schema import SchemaMissingKeyError, Schema, Or
-from griptape.tasks import ActionsSubtask, ToolkitTask
+from schema import Or, Schema, SchemaMissingKeyError
+
 from griptape.common import ToolAction
+from griptape.tasks import ActionsSubtask, ToolkitTask
 from tests.mocks.mock_tool.tool import MockTool
 from tests.utils import defaults
 
@@ -153,7 +155,7 @@ class TestBaseTool:
         "$schema": "http://json-schema.org/draft-07/schema#",
     }
 
-    @pytest.fixture
+    @pytest.fixture()
     def tool(self):
         return MockTool(test_field="hello", test_int=5, test_dict={"foo": "bar"})
 
@@ -195,9 +197,9 @@ class TestBaseTool:
 
     def test_invalid_config(self):
         try:
-            from tests.mocks.invalid_mock_tool.tool import InvalidMockTool  # noqa
+            from tests.mocks.invalid_mock_tool.tool import InvalidMockTool  # noqa: F401
 
-            assert False
+            raise AssertionError()
         except SchemaMissingKeyError:
             assert True
 
@@ -247,11 +249,18 @@ class TestBaseTool:
 
         assert tool_schema == self.TARGET_TOOL_SCHEMA
 
-    def test_to_native_tool_name(self, tool):
+    def test_to_native_tool_name(self, tool, mocker):
         tool = MockTool()
 
         assert tool.to_native_tool_name(tool.test) == "MockTool_test"
 
-        with pytest.raises(ValueError):
-            tool.name = "mock_tool"
+        # Bad name
+        tool.name = "mock_tool"
+        with pytest.raises(ValueError, match="Tool name"):
             tool.to_native_tool_name(tool.foo)
+
+        # Bad activity name
+        mocker.patch.object(tool, "activity_name", return_value="foo^bar")
+        tool.name = "MockTool"
+        with pytest.raises(ValueError, match="Activity name"):
+            tool.to_native_tool_name(tool.test)

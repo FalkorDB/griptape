@@ -6,7 +6,7 @@ from urllib.parse import urljoin
 
 from attrs import Factory, define, field
 
-from griptape.artifacts import BaseArtifact, ErrorArtifact, InfoArtifact, TextArtifact
+from griptape.artifacts import BaseArtifact, ErrorArtifact, InfoArtifact
 from griptape.drivers.structure_run.base_structure_run_driver import BaseStructureRunDriver
 
 
@@ -15,7 +15,8 @@ class GriptapeCloudStructureRunDriver(BaseStructureRunDriver):
     base_url: str = field(default="https://cloud.griptape.ai", kw_only=True)
     api_key: str = field(kw_only=True)
     headers: dict = field(
-        default=Factory(lambda self: {"Authorization": f"Bearer {self.api_key}"}, takes_self=True), kw_only=True
+        default=Factory(lambda self: {"Authorization": f"Bearer {self.api_key}"}, takes_self=True),
+        kw_only=True,
     )
     structure_id: str = field(kw_only=True)
     structure_run_wait_time_interval: int = field(default=2, kw_only=True)
@@ -29,7 +30,9 @@ class GriptapeCloudStructureRunDriver(BaseStructureRunDriver):
 
         try:
             response: Response = post(
-                url, json={"args": [arg.value for arg in args], "env": self.env}, headers=self.headers
+                url,
+                json={"args": [arg.value for arg in args], "env": self.env},
+                headers=self.headers,
             )
             response.raise_for_status()
             response_json = response.json()
@@ -41,7 +44,7 @@ class GriptapeCloudStructureRunDriver(BaseStructureRunDriver):
         except (exceptions.RequestException, HTTPError) as err:
             return ErrorArtifact(str(err))
 
-    def _get_structure_run_result(self, structure_run_id: str) -> InfoArtifact | TextArtifact | ErrorArtifact:
+    def _get_structure_run_result(self, structure_run_id: str) -> InfoArtifact | BaseArtifact | ErrorArtifact:
         url = urljoin(self.base_url.strip("/"), f"/api/structure-runs/{structure_run_id}")
 
         result = self._get_structure_run_result_attempt(url)
@@ -57,14 +60,14 @@ class GriptapeCloudStructureRunDriver(BaseStructureRunDriver):
 
         if wait_attempts >= self.structure_run_max_wait_time_attempts:
             return ErrorArtifact(
-                f"Failed to get Run result after {self.structure_run_max_wait_time_attempts} attempts."
+                f"Failed to get Run result after {self.structure_run_max_wait_time_attempts} attempts.",
             )
 
         if status != "SUCCEEDED":
             return ErrorArtifact(result)
 
         if "output" in result:
-            return TextArtifact.from_dict(result["output"])
+            return BaseArtifact.from_dict(result["output"])
         else:
             return InfoArtifact("No output found in response")
 

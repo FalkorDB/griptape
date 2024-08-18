@@ -82,10 +82,10 @@ class OpenWeatherClient(BaseTool):
                         "For US cities, use the format 'city_name, state_code'. "
                         "For non-US cities, use 'city_name, country_code'. "
                         "For cities without specifying state or country, simply use 'city_name'.",
-                    ): str
-                }
+                    ): str,
+                },
             ),
-        }
+        },
     )
     def get_coordinates_by_location(self, params: dict) -> InfoArtifact | ErrorArtifact:
         location = params["values"].get("location")
@@ -109,10 +109,12 @@ class OpenWeatherClient(BaseTool):
                     return data[0]["lat"], data[0]["lon"]
             else:
                 logging.error(
-                    f"Error fetching coordinates. HTTP Status Code: {response.status_code}. Response: {response.text}"
+                    "Error fetching coordinates. HTTP Status Code: %s. Response: %s",
+                    response.status_code,
+                    response.text,
                 )
         except Exception as e:
-            logging.error(f"Error fetching coordinates: {e}")
+            logging.error("Error fetching coordinates: %s", e)
         return None
 
     @activity(
@@ -120,7 +122,7 @@ class OpenWeatherClient(BaseTool):
             "description": "Can be used to fetch current weather data for a given location. "
             "Temperatures are returned in {{ _self.units }} by default.",
             "schema": Schema({Literal("location", description="Location to fetch weather data for."): str}),
-        }
+        },
     )
     def get_current_weather_by_location(self, params: dict) -> ListArtifact | TextArtifact | ErrorArtifact:
         location = params["values"].get("location")
@@ -143,7 +145,7 @@ class OpenWeatherClient(BaseTool):
             "description": "Can be used to fetch hourly forecast for a given location up to 48 hours ahead. "
             "Temperatures are returned in {{ _self.units }} by default.",
             "schema": Schema({Literal("location", description="Location to fetch hourly forecast for."): str}),
-        }
+        },
     )
     def get_hourly_forecast_by_location(self, params: dict) -> ListArtifact | TextArtifact | ErrorArtifact:
         location = params["values"].get("location")
@@ -166,7 +168,7 @@ class OpenWeatherClient(BaseTool):
             "description": "Can be used to fetch daily forecast for a given location up to 8 days ahead. "
             "Temperatures are returned in {{ _self.units }} by default.",
             "schema": Schema({Literal("location", description="Location to fetch daily forecast for."): str}),
-        }
+        },
     )
     def get_daily_forecast_by_location(self, params: dict) -> ListArtifact | TextArtifact | ErrorArtifact:
         location = params["values"].get("location")
@@ -195,8 +197,12 @@ class OpenWeatherClient(BaseTool):
                 else:
                     return TextArtifact(str(data))
             else:
-                logging.error(f"Error fetching weather data. HTTP Status Code: {response.status_code}")
+                logging.error(
+                    "Error fetching weather data. HTTP Status Code: %s. Response: %s",
+                    response.status_code,
+                    response.text,
+                )
                 return ErrorArtifact("Error fetching weather data from OpenWeather API")
         except Exception as e:
-            logging.error(f"Error fetching weather data: {e}")
+            logging.error("Error fetching weather data: %s", e)
             return ErrorArtifact(f"Error fetching weather data: {e}")

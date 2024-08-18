@@ -3,16 +3,19 @@ from __future__ import annotations
 import inspect
 import logging
 import os
+import re
 import subprocess
 import sys
 from abc import ABC
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
+import schema
 import yaml
-from attrs import Factory, define, field
+from attrs import Attribute, Factory, define, field
 from schema import Literal, Or, Schema
 
 from griptape.artifacts import BaseArtifact, ErrorArtifact, InfoArtifact, TextArtifact
+from griptape.common import observable
 from griptape.mixins import ActivityMixin
 
 if TYPE_CHECKING:
@@ -51,7 +54,7 @@ class BaseTool(ActivityMixin, ABC):
             self.install_dependencies(os.environ.copy())
 
     @output_memory.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_output_memory(self, _, output_memory: dict[str, Optional[list[TaskMemory]]]) -> None:
+    def validate_output_memory(self, _: Attribute, output_memory: dict[str, Optional[list[TaskMemory]]]) -> None:
         if output_memory:
             for activity_name, memory_list in output_memory.items():
                 if not self.find_activity(activity_name):
@@ -78,11 +81,11 @@ class BaseTool(ActivityMixin, ABC):
             return yaml.safe_load(yaml_file)
 
     @property
-    def abs_file_path(self):
+    def abs_file_path(self) -> str:
         return os.path.abspath(inspect.getfile(self.__class__))
 
     @property
-    def abs_dir_path(self):
+    def abs_dir_path(self) -> str:
         return os.path.dirname(self.abs_file_path)
 
     # This method has to remain a method and can't be decorated with @property because
@@ -93,18 +96,25 @@ class BaseTool(ActivityMixin, ABC):
         return full_schema.json_schema(f"{self.name} ToolAction Schema")
 
     def activity_schemas(self) -> list[Schema]:
-        return [
-            Schema(
-                {
-                    Literal("name"): self.name,
-                    Literal("path", description=self.activity_description(activity)): self.activity_name(activity),
-                    **self.activity_to_input(
-                        activity
-                    ),  # Unpack the dictionary in order to only add the key-values if there are any
-                }
-            )
-            for activity in self.activities()
-        ]
+        schemas = []
+
+        for activity in self.activities():
+            schema_dict: dict[Literal | schema.Optional, Any] = {
+                Literal("name"): self.name,
+                Literal("path", description=self.activity_description(activity)): self.activity_name(activity),
+            }
+
+            activity_schema = self.activity_schema(activity)
+            # If no schema is defined, we just make `input` optional instead of omitting it.
+            # This works better with lower-end models that may accidentally pass in an empty dict.
+            if activity_schema is None:
+                schema_dict[schema.Optional("input")] = {}
+            else:
+                schema_dict[Literal("input")] = activity_schema.schema
+
+            schemas.append(Schema(schema_dict))
+
+        return schemas
 
     def execute(self, activity: Callable, subtask: ActionsSubtask, action: ToolAction) -> BaseArtifact:
         try:
@@ -121,8 +131,13 @@ class BaseTool(ActivityMixin, ABC):
     def before_run(self, activity: Callable, subtask: ActionsSubtask, action: ToolAction) -> Optional[dict]:
         return action.input
 
+    @observable(tags=["Tool.run()"])
     def run(
-        self, activity: Callable, subtask: ActionsSubtask, action: ToolAction, value: Optional[dict]
+        self,
+        activity: Callable,
+        subtask: ActionsSubtask,
+        action: ToolAction,
+        value: Optional[dict],
     ) -> BaseArtifact:
         activity_result = activity(value)
 
@@ -136,7 +151,11 @@ class BaseTool(ActivityMixin, ABC):
         return result
 
     def after_run(
-        self, activity: Callable, subtask: ActionsSubtask, action: ToolAction, value: BaseArtifact
+        self,
+        activity: Callable,
+        subtask: ActionsSubtask,
+        action: ToolAction,
+        value: BaseArtifact,
     ) -> BaseArtifact:
         if value:
             if self.output_memory:
@@ -166,13 +185,13 @@ class BaseTool(ActivityMixin, ABC):
 
         return True
 
-    def tool_dir(self):
+    def tool_dir(self) -> str:
         class_file = inspect.getfile(self.__class__)
 
         return os.path.dirname(os.path.abspath(class_file))
 
     def install_dependencies(self, env: Optional[dict[str, str]] = None) -> None:
-        env = env if env else {}
+        env = env or {}
 
         command = [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"]
 
@@ -196,15 +215,23 @@ class BaseTool(ActivityMixin, ABC):
             return None
 
     def to_native_tool_name(self, activity: Callable) -> str:
-        """Converts a Tool into to a native tool name.
+        """Converts a Tool's name and an Activity into to a native tool name.
+
+        The native tool name is a combination of the Tool's name and the Activity's name.
+        The Tool's name may only contain letters and numbers, and the Activity's name may only contain letters, numbers, and underscores.
 
         Args:
-            activity: Activity to convert.
+            activity: Activity to convert
 
         Returns:
             str: Native tool name.
         """
-        if "_" in self.name:
-            raise ValueError("Tool name can't contain underscores when using native tools.")
+        tool_name = self.name
+        if re.match(r"^[a-zA-Z0-9]+$", tool_name) is None:
+            raise ValueError("Tool name can only contain letters and numbers.")
 
-        return f"{self.name}_{self.activity_name(activity)}"
+        activity_name = self.activity_name(activity)
+        if re.match(r"^[a-zA-Z0-9_]+$", activity_name) is None:
+            raise ValueError("Activity name can only contain letters, numbers, and underscores.")
+
+        return f"{tool_name}_{activity_name}"

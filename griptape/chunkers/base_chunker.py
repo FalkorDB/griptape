@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC
 from typing import Optional
 
-from attrs import Factory, define, field
+from attrs import Attribute, Factory, define, field
 
 from griptape.artifacts import TextArtifact
 from griptape.chunkers import ChunkSeparator
@@ -15,17 +15,20 @@ class BaseChunker(ABC):
     DEFAULT_SEPARATORS = [ChunkSeparator(" ")]
 
     separators: list[ChunkSeparator] = field(
-        default=Factory(lambda self: self.DEFAULT_SEPARATORS, takes_self=True), kw_only=True
+        default=Factory(lambda self: self.DEFAULT_SEPARATORS, takes_self=True),
+        kw_only=True,
     )
     tokenizer: BaseTokenizer = field(
-        default=Factory(lambda: OpenAiTokenizer(model=OpenAiTokenizer.DEFAULT_OPENAI_GPT_3_CHAT_MODEL)), kw_only=True
+        default=Factory(lambda: OpenAiTokenizer(model=OpenAiTokenizer.DEFAULT_OPENAI_GPT_3_CHAT_MODEL)),
+        kw_only=True,
     )
     max_tokens: int = field(
-        default=Factory(lambda self: self.tokenizer.max_input_tokens, takes_self=True), kw_only=True
+        default=Factory(lambda self: self.tokenizer.max_input_tokens, takes_self=True),
+        kw_only=True,
     )
 
     @max_tokens.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_max_tokens(self, _, max_tokens: int) -> None:
+    def validate_max_tokens(self, _: Attribute, max_tokens: int) -> None:
         if max_tokens < 0:
             raise ValueError("max_tokens must be 0 or greater.")
 

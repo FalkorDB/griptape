@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, NoReturn, Optional
 
 from attrs import Factory, define, field
 
@@ -29,7 +29,8 @@ class MarqoVectorStoreDriver(BaseVectorStoreDriver):
     url: str = field(kw_only=True, metadata={"serializable": True})
     mq: Optional[marqo.Client] = field(
         default=Factory(
-            lambda self: import_optional_dependency("marqo").Client(self.url, api_key=self.api_key), takes_self=True
+            lambda self: import_optional_dependency("marqo").Client(self.url, api_key=self.api_key),
+            takes_self=True,
         ),
         kw_only=True,
     )
@@ -38,6 +39,7 @@ class MarqoVectorStoreDriver(BaseVectorStoreDriver):
     def upsert_text(
         self,
         string: str,
+        *,
         vector_id: Optional[str] = None,
         namespace: Optional[str] = None,
         meta: Optional[dict] = None,
@@ -72,6 +74,7 @@ class MarqoVectorStoreDriver(BaseVectorStoreDriver):
     def upsert_text_artifact(
         self,
         artifact: TextArtifact,
+        *,
         namespace: Optional[str] = None,
         meta: Optional[dict] = None,
         vector_id: Optional[str] = None,
@@ -105,7 +108,7 @@ class MarqoVectorStoreDriver(BaseVectorStoreDriver):
         else:
             raise ValueError(f"Failed to upsert text: {response}")
 
-    def load_entry(self, vector_id: str, namespace: Optional[str] = None) -> Optional[BaseVectorStoreDriver.Entry]:
+    def load_entry(self, vector_id: str, *, namespace: Optional[str] = None) -> Optional[BaseVectorStoreDriver.Entry]:
         """Load a document entry from the Marqo index.
 
         Args:
@@ -120,13 +123,13 @@ class MarqoVectorStoreDriver(BaseVectorStoreDriver):
         if result and "_tensor_facets" in result and len(result["_tensor_facets"]) > 0:
             return BaseVectorStoreDriver.Entry(
                 id=result["_id"],
-                meta={k: v for k, v in result.items() if k not in ["_id"]},
+                meta={k: v for k, v in result.items() if k != "_id"},
                 vector=result["_tensor_facets"][0]["_embedding"],
             )
         else:
             return None
 
-    def load_entries(self, namespace: Optional[str] = None) -> list[BaseVectorStoreDriver.Entry]:
+    def load_entries(self, *, namespace: Optional[str] = None) -> list[BaseVectorStoreDriver.Entry]:
         """Load all document entries from the Marqo index.
 
         Args:
@@ -158,7 +161,7 @@ class MarqoVectorStoreDriver(BaseVectorStoreDriver):
                         vector=doc["_tensor_facets"][0]["_embedding"],
                         meta={k: v for k, v in doc.items() if k not in ["_id", "_tensor_facets", "_found"]},
                         namespace=doc.get("namespace"),
-                    )
+                    ),
                 )
 
         return entries
@@ -166,6 +169,7 @@ class MarqoVectorStoreDriver(BaseVectorStoreDriver):
     def query(
         self,
         query: str,
+        *,
         count: Optional[int] = None,
         namespace: Optional[str] = None,
         include_vectors: bool = False,
@@ -186,7 +190,7 @@ class MarqoVectorStoreDriver(BaseVectorStoreDriver):
             The list of query results.
         """
         params = {
-            "limit": count if count else BaseVectorStoreDriver.DEFAULT_QUERY_COUNT,
+            "limit": count or BaseVectorStoreDriver.DEFAULT_QUERY_COUNT,
             "attributes_to_retrieve": ["*"] if include_metadata else ["_id"],
             "filter_string": f"namespace:{namespace}" if namespace else None,
         } | kwargs
@@ -227,6 +231,7 @@ class MarqoVectorStoreDriver(BaseVectorStoreDriver):
     def upsert_vector(
         self,
         vector: list[float],
+        *,
         vector_id: Optional[str] = None,
         namespace: Optional[str] = None,
         meta: Optional[dict] = None,
@@ -249,5 +254,5 @@ class MarqoVectorStoreDriver(BaseVectorStoreDriver):
         """
         raise NotImplementedError(f"{self.__class__.__name__} does not support upserting a vector.")
 
-    def delete_vector(self, vector_id: str):
+    def delete_vector(self, vector_id: str) -> NoReturn:
         raise NotImplementedError(f"{self.__class__.__name__} does not support deletion.")

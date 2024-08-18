@@ -5,26 +5,22 @@ from typing import TYPE_CHECKING, Optional
 
 from attrs import define, field
 
-from griptape.events import FinishAudioTranscriptionEvent, StartAudioTranscriptionEvent
+from griptape.events import FinishAudioTranscriptionEvent, StartAudioTranscriptionEvent, event_bus
 from griptape.mixins import ExponentialBackoffMixin, SerializableMixin
 
 if TYPE_CHECKING:
     from griptape.artifacts import AudioArtifact, TextArtifact
-    from griptape.structures import Structure
 
 
 @define
 class BaseAudioTranscriptionDriver(SerializableMixin, ExponentialBackoffMixin, ABC):
     model: str = field(kw_only=True, metadata={"serializable": True})
-    structure: Optional[Structure] = field(default=None, kw_only=True)
 
     def before_run(self) -> None:
-        if self.structure:
-            self.structure.publish_event(StartAudioTranscriptionEvent())
+        event_bus.publish_event(StartAudioTranscriptionEvent())
 
     def after_run(self) -> None:
-        if self.structure:
-            self.structure.publish_event(FinishAudioTranscriptionEvent())
+        event_bus.publish_event(FinishAudioTranscriptionEvent())
 
     def run(self, audio: AudioArtifact, prompts: Optional[list[str]] = None) -> TextArtifact:
         for attempt in self.retrying():

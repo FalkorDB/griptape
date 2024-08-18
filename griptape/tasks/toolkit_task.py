@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Callable, Optional
 
-from attrs import Factory, define, field
+from attrs import Attribute, Factory, define, field
 
 from griptape import utils
 from griptape.artifacts import ActionArtifact, BaseArtifact, ErrorArtifact, ListArtifact, TextArtifact
@@ -32,19 +32,22 @@ class ToolkitTask(PromptTask, ActionsSubtaskOriginMixin):
     task_memory: Optional[TaskMemory] = field(default=None, kw_only=True)
     subtasks: list[ActionsSubtask] = field(factory=list)
     generate_assistant_subtask_template: Callable[[ActionsSubtask], str] = field(
-        default=Factory(lambda self: self.default_assistant_subtask_template_generator, takes_self=True), kw_only=True
+        default=Factory(lambda self: self.default_assistant_subtask_template_generator, takes_self=True),
+        kw_only=True,
     )
     generate_user_subtask_template: Callable[[ActionsSubtask], str] = field(
-        default=Factory(lambda self: self.default_user_subtask_template_generator, takes_self=True), kw_only=True
+        default=Factory(lambda self: self.default_user_subtask_template_generator, takes_self=True),
+        kw_only=True,
     )
     response_stop_sequence: str = field(default=RESPONSE_STOP_SEQUENCE, kw_only=True)
 
     def __attrs_post_init__(self) -> None:
+        super().__attrs_post_init__()
         if self.task_memory:
             self.set_default_tools_memory(self.task_memory)
 
     @tools.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_tools(self, _, tools: list[BaseTool]) -> None:
+    def validate_tools(self, _: Attribute, tools: list[BaseTool]) -> None:
         tool_names = [t.name for t in tools]
 
         if len(tool_names) > len(set(tool_names)):
@@ -90,16 +93,16 @@ class ToolkitTask(PromptTask, ActionsSubtaskOriginMixin):
                             [
                                 *([TextArtifact(s.thought)] if s.thought else []),
                                 *[ActionArtifact(a) for a in action_calls],
-                            ]
-                        )
+                            ],
+                        ),
                     )
                     stack.add_user_message(
                         ListArtifact(
                             [
                                 *[ActionArtifact(a) for a in action_results],
                                 *([] if s.output else [TextArtifact("Please keep going")]),
-                            ]
-                        )
+                            ],
+                        ),
                     )
                 else:
                     stack.add_assistant_message(self.generate_assistant_subtask_template(s))
@@ -134,12 +137,14 @@ class ToolkitTask(PromptTask, ActionsSubtaskOriginMixin):
 
     def default_assistant_subtask_template_generator(self, subtask: ActionsSubtask) -> str:
         return J2("tasks/toolkit_task/assistant_subtask.j2").render(
-            stop_sequence=self.response_stop_sequence, subtask=subtask
+            stop_sequence=self.response_stop_sequence,
+            subtask=subtask,
         )
 
     def default_user_subtask_template_generator(self, subtask: ActionsSubtask) -> str:
         return J2("tasks/toolkit_task/user_subtask.j2").render(
-            stop_sequence=self.response_stop_sequence, subtask=subtask
+            stop_sequence=self.response_stop_sequence,
+            subtask=subtask,
         )
 
     def actions_schema(self) -> Schema:
@@ -195,6 +200,7 @@ class ToolkitTask(PromptTask, ActionsSubtaskOriginMixin):
 
     def add_subtask(self, subtask: ActionsSubtask) -> ActionsSubtask:
         subtask.attach_to(self)
+        subtask.structure = self.structure
 
         if len(self.subtasks) > 0:
             self.subtasks[-1].add_child(subtask)

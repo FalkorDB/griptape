@@ -6,13 +6,19 @@ from abc import ABC, abstractmethod
 from logging import Logger
 from typing import TYPE_CHECKING, Any, Optional
 
-from attrs import Factory, define, field
+from attrs import Attribute, Factory, define, field
 from rich.logging import RichHandler
 
 from griptape.artifacts import BaseArtifact, BlobArtifact, TextArtifact
+from griptape.common import observable
 from griptape.config import BaseStructureConfig, OpenAiStructureConfig, StructureConfig
-from griptape.drivers import BaseEmbeddingDriver, BasePromptDriver, OpenAiChatPromptDriver, OpenAiEmbeddingDriver
-from griptape.drivers.vector.local_vector_store_driver import LocalVectorStoreDriver
+from griptape.drivers import (
+    BaseEmbeddingDriver,
+    BasePromptDriver,
+    LocalVectorStoreDriver,
+    OpenAiChatPromptDriver,
+    OpenAiEmbeddingDriver,
+)
 from griptape.engines import CsvExtractionEngine, JsonExtractionEngine, PromptSummaryEngine
 from griptape.engines.rag import RagEngine
 from griptape.engines.rag.modules import (
@@ -22,8 +28,7 @@ from griptape.engines.rag.modules import (
     VectorStoreRetrievalRagModule,
 )
 from griptape.engines.rag.stages import ResponseRagStage, RetrievalRagStage
-from griptape.events.finish_structure_run_event import FinishStructureRunEvent
-from griptape.events.start_structure_run_event import StartStructureRunEvent
+from griptape.events import FinishStructureRunEvent, StartStructureRunEvent, event_bus
 from griptape.memory import TaskMemory
 from griptape.memory.meta import MetaMemory
 from griptape.memory.structure import ConversationMemory
@@ -31,7 +36,6 @@ from griptape.memory.task.storage import BlobArtifactStorage, TextArtifactStorag
 from griptape.utils import deprecation_warn
 
 if TYPE_CHECKING:
-    from griptape.events import BaseEvent, EventListener
     from griptape.memory.structure import BaseConversationMemory
     from griptape.rules import Rule, Ruleset
     from griptape.tasks import BaseTask
@@ -46,23 +50,25 @@ class Structure(ABC):
     prompt_driver: Optional[BasePromptDriver] = field(default=None)
     embedding_driver: Optional[BaseEmbeddingDriver] = field(default=None, kw_only=True)
     config: BaseStructureConfig = field(
-        default=Factory(lambda self: self.default_config, takes_self=True), kw_only=True
+        default=Factory(lambda self: self.default_config, takes_self=True),
+        kw_only=True,
     )
     rulesets: list[Ruleset] = field(factory=list, kw_only=True)
     rules: list[Rule] = field(factory=list, kw_only=True)
     tasks: list[BaseTask] = field(factory=list, kw_only=True)
     custom_logger: Optional[Logger] = field(default=None, kw_only=True)
     logger_level: int = field(default=logging.INFO, kw_only=True)
-    event_listeners: list[EventListener] = field(factory=list, kw_only=True)
     conversation_memory: Optional[BaseConversationMemory] = field(
         default=Factory(
-            lambda self: ConversationMemory(driver=self.config.conversation_memory_driver), takes_self=True
+            lambda self: ConversationMemory(driver=self.config.conversation_memory_driver),
+            takes_self=True,
         ),
         kw_only=True,
     )
     rag_engine: RagEngine = field(default=Factory(lambda self: self.default_rag_engine, takes_self=True), kw_only=True)
     task_memory: TaskMemory = field(
-        default=Factory(lambda self: self.default_task_memory, takes_self=True), kw_only=True
+        default=Factory(lambda self: self.default_task_memory, takes_self=True),
+        kw_only=True,
     )
     meta_memory: MetaMemory = field(default=Factory(lambda: MetaMemory()), kw_only=True)
     fail_fast: bool = field(default=True, kw_only=True)
@@ -70,7 +76,7 @@ class Structure(ABC):
     _logger: Optional[Logger] = None
 
     @rulesets.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_rulesets(self, _, rulesets: list[Ruleset]) -> None:
+    def validate_rulesets(self, _: Attribute, rulesets: list[Ruleset]) -> None:
         if not rulesets:
             return
 
@@ -78,7 +84,7 @@ class Structure(ABC):
             raise ValueError("can't have both rulesets and rules specified")
 
     @rules.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_rules(self, _, rules: list[Rule]) -> None:
+    def validate_rules(self, _: Attribute, rules: list[Rule]) -> None:
         if not rules:
             return
 
@@ -86,7 +92,7 @@ class Structure(ABC):
             raise ValueError("can't have both rules and rulesets specified")
 
     def __attrs_post_init__(self) -> None:
-        if self.conversation_memory:
+        if self.conversation_memory is not None:
             self.conversation_memory.structure = self
 
         tasks = self.tasks.copy()
@@ -97,17 +103,17 @@ class Structure(ABC):
         return self.add_tasks(*other) if isinstance(other, list) else self + [other]
 
     @prompt_driver.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_prompt_driver(self, attribute, value):
+    def validate_prompt_driver(self, attribute: Attribute, value: BasePromptDriver) -> None:
         if value is not None:
             deprecation_warn(f"`{attribute.name}` is deprecated, use `config.prompt_driver` instead.")
 
     @embedding_driver.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_embedding_driver(self, attribute, value):
+    def validate_embedding_driver(self, attribute: Attribute, value: BaseEmbeddingDriver) -> None:
         if value is not None:
             deprecation_warn(f"`{attribute.name}` is deprecated, use `config.embedding_driver` instead.")
 
     @stream.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_stream(self, attribute, value):
+    def validate_stream(self, attribute: Attribute, value: bool) -> None:  # noqa: FBT001
         if value is not None:
             deprecation_warn(f"`{attribute.name}` is deprecated, use `config.prompt_driver.stream` instead.")
 
@@ -171,7 +177,7 @@ class Structure(ABC):
     def default_rag_engine(self) -> RagEngine:
         return RagEngine(
             retrieval_stage=RetrievalRagStage(
-                retrieval_modules=[VectorStoreRetrievalRagModule(vector_store_driver=self.config.vector_store_driver)]
+                retrieval_modules=[VectorStoreRetrievalRagModule(vector_store_driver=self.config.vector_store_driver)],
             ),
             response_stage=ResponseRagStage(
                 before_response_modules=[
@@ -195,7 +201,7 @@ class Structure(ABC):
                     json_extraction_engine=JsonExtractionEngine(prompt_driver=self.config.prompt_driver),
                 ),
                 BlobArtifact: BlobArtifactStorage(),
-            }
+            },
         )
 
     def is_finished(self) -> bool:
@@ -205,35 +211,28 @@ class Structure(ABC):
         return any(s for s in self.tasks if s.is_executing())
 
     def find_task(self, task_id: str) -> BaseTask:
+        if (task := self.try_find_task(task_id)) is not None:
+            return task
+        raise ValueError(f"Task with id {task_id} doesn't exist.")
+
+    def try_find_task(self, task_id: str) -> Optional[BaseTask]:
         for task in self.tasks:
             if task.id == task_id:
                 return task
-        raise ValueError(f"Task with id {task_id} doesn't exist.")
+        return None
 
     def add_tasks(self, *tasks: BaseTask) -> list[BaseTask]:
         return [self.add_task(s) for s in tasks]
-
-    def add_event_listener(self, event_listener: EventListener) -> EventListener:
-        if event_listener not in self.event_listeners:
-            self.event_listeners.append(event_listener)
-
-        return event_listener
-
-    def remove_event_listener(self, event_listener: EventListener) -> None:
-        if event_listener in self.event_listeners:
-            self.event_listeners.remove(event_listener)
-        else:
-            raise ValueError("Event Listener not found.")
-
-    def publish_event(self, event: BaseEvent, flush: bool = False) -> None:
-        for event_listener in self.event_listeners:
-            event_listener.publish_event(event, flush)
 
     def context(self, task: BaseTask) -> dict[str, Any]:
         return {"args": self.execution_args, "structure": self}
 
     def resolve_relationships(self) -> None:
-        task_by_id = {task.id: task for task in self.tasks}
+        task_by_id = {}
+        for task in self.tasks:
+            if task.id in task_by_id:
+                raise ValueError(f"Duplicate task with id {task.id} found.")
+            task_by_id[task.id] = task
 
         for task in self.tasks:
             # Ensure parents include this task as a child
@@ -252,21 +251,25 @@ class Structure(ABC):
                 if task.id not in child.parent_ids:
                     child.parent_ids.append(task.id)
 
+    @observable
     def before_run(self, args: Any) -> None:
         self._execution_args = args
 
         [task.reset() for task in self.tasks]
 
-        self.publish_event(
+        event_bus.publish_event(
             StartStructureRunEvent(
-                structure_id=self.id, input_task_input=self.input_task.input, input_task_output=self.input_task.output
-            )
+                structure_id=self.id,
+                input_task_input=self.input_task.input,
+                input_task_output=self.input_task.output,
+            ),
         )
 
         self.resolve_relationships()
 
+    @observable
     def after_run(self) -> None:
-        self.publish_event(
+        event_bus.publish_event(
             FinishStructureRunEvent(
                 structure_id=self.id,
                 output_task_input=self.output_task.input,
@@ -278,6 +281,7 @@ class Structure(ABC):
     @abstractmethod
     def add_task(self, task: BaseTask) -> BaseTask: ...
 
+    @observable
     def run(self, *args) -> Structure:
         self.before_run(args)
 

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from attrs import Factory, define, field
+from attrs import Attribute, Factory, define, field
 
 from griptape.utils.import_utils import import_optional_dependency
 
@@ -32,8 +30,8 @@ class AmazonS3FileManagerDriver(BaseFileManagerDriver):
     s3_client: Any = field(default=Factory(lambda self: self.session.client("s3"), takes_self=True), kw_only=True)
 
     @workdir.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_workdir(self, _, workdir: str) -> None:
-        if not Path(workdir).is_absolute():
+    def validate_workdir(self, _: Attribute, workdir: str) -> None:
+        if not workdir.startswith("/"):
             raise ValueError("Workdir must be an absolute path")
 
     def try_list_files(self, path: str) -> list[str]:
@@ -62,7 +60,7 @@ class AmazonS3FileManagerDriver(BaseFileManagerDriver):
             else:
                 raise e
 
-    def try_save_file(self, path: str, value: bytes):
+    def try_save_file(self, path: str, value: bytes) -> None:
         full_key = self._to_full_key(path)
         if self._is_a_directory(full_key):
             raise IsADirectoryError
@@ -70,11 +68,13 @@ class AmazonS3FileManagerDriver(BaseFileManagerDriver):
 
     def _to_full_key(self, path: str) -> str:
         path = path.lstrip("/")
-        full_key = os.path.join(self.workdir, path)
+        full_key = f"{self.workdir}/{path}"
         # Need to keep the trailing slash if it was there,
         # because it means the path is a directory.
         ended_with_slash = path.endswith("/")
-        full_key = os.path.normpath(full_key)
+
+        full_key = self._normpath(full_key)
+
         if ended_with_slash:
             full_key += "/"
         return full_key.lstrip("/")
@@ -94,14 +94,17 @@ class AmazonS3FileManagerDriver(BaseFileManagerDriver):
 
         paginator = self.s3_client.get_paginator("list_objects_v2")
         pages = paginator.paginate(
-            Bucket=self.bucket, Prefix=full_key, Delimiter="/", PaginationConfig=pagination_config
+            Bucket=self.bucket,
+            Prefix=full_key,
+            Delimiter="/",
+            PaginationConfig=pagination_config,
         )
         files_and_dirs = []
         for page in pages:
             for obj in page.get("CommonPrefixes", []):
                 prefix = obj.get("Prefix")
-                dir = prefix[len(full_key) :].rstrip("/")
-                files_and_dirs.append(dir)
+                directory = prefix[len(full_key) :].rstrip("/")
+                files_and_dirs.append(directory)
 
             for obj in page.get("Contents", []):
                 key = obj.get("Key")
@@ -123,3 +126,20 @@ class AmazonS3FileManagerDriver(BaseFileManagerDriver):
                 raise e
 
         return False
+
+    def _normpath(self, path: str) -> str:
+        unix_path = path.replace("\\", "/")
+        parts = unix_path.split("/")
+        stack = []
+
+        for part in parts:
+            if part == "" or part == ".":
+                continue
+            if part == "..":
+                if stack:
+                    stack.pop()
+            else:
+                stack.append(part)
+
+        normalized_path = "/".join(stack)
+        return normalized_path

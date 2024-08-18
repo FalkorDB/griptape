@@ -21,6 +21,7 @@ from griptape.common import (
     TextDeltaMessageContent,
     TextMessageContent,
     ToolAction,
+    observable,
 )
 from griptape.drivers import BasePromptDriver
 from griptape.tokenizers import BaseTokenizer, OpenAiTokenizer
@@ -58,15 +59,18 @@ class OpenAiChatPromptDriver(BasePromptDriver):
         default=Factory(
             lambda self: openai.OpenAI(api_key=self.api_key, base_url=self.base_url, organization=self.organization),
             takes_self=True,
-        )
+        ),
     )
     model: str = field(kw_only=True, metadata={"serializable": True})
     tokenizer: BaseTokenizer = field(
-        default=Factory(lambda self: OpenAiTokenizer(model=self.model), takes_self=True), kw_only=True
+        default=Factory(lambda self: OpenAiTokenizer(model=self.model), takes_self=True),
+        kw_only=True,
     )
     user: str = field(default="", kw_only=True, metadata={"serializable": True})
     response_format: Optional[Literal["json_object"]] = field(
-        default=None, kw_only=True, metadata={"serializable": True}
+        default=None,
+        kw_only=True,
+        metadata={"serializable": True},
     )
     seed: Optional[int] = field(default=None, kw_only=True, metadata={"serializable": True})
     tool_choice: str = field(default="auto", kw_only=True, metadata={"serializable": False})
@@ -80,11 +84,12 @@ class OpenAiChatPromptDriver(BasePromptDriver):
                 openai.NotFoundError,
                 openai.ConflictError,
                 openai.UnprocessableEntityError,
-            )
+            ),
         ),
         kw_only=True,
     )
 
+    @observable
     def try_run(self, prompt_stack: PromptStack) -> Message:
         result = self.client.chat.completions.create(**self._base_params(prompt_stack))
 
@@ -95,12 +100,14 @@ class OpenAiChatPromptDriver(BasePromptDriver):
                 content=self.__to_prompt_stack_message_content(message),
                 role=Message.ASSISTANT_ROLE,
                 usage=Message.Usage(
-                    input_tokens=result.usage.prompt_tokens, output_tokens=result.usage.completion_tokens
+                    input_tokens=result.usage.prompt_tokens,
+                    output_tokens=result.usage.completion_tokens,
                 ),
             )
         else:
             raise Exception("Completion with more than one choice is not supported yet.")
 
+    @observable
     def try_stream(self, prompt_stack: PromptStack) -> Iterator[DeltaMessage]:
         result = self.client.chat.completions.create(**self._base_params(prompt_stack), stream=True)
 
@@ -108,8 +115,9 @@ class OpenAiChatPromptDriver(BasePromptDriver):
             if chunk.usage is not None:
                 yield DeltaMessage(
                     usage=DeltaMessage.Usage(
-                        input_tokens=chunk.usage.prompt_tokens, output_tokens=chunk.usage.completion_tokens
-                    )
+                        input_tokens=chunk.usage.prompt_tokens,
+                        output_tokens=chunk.usage.completion_tokens,
+                    ),
                 )
             elif chunk.choices is not None:
                 if len(chunk.choices) == 1:
@@ -151,58 +159,53 @@ class OpenAiChatPromptDriver(BasePromptDriver):
         openai_messages = []
 
         for message in messages:
+            # If the message only contains textual content we can send it as a single content.
             if message.is_text():
-                openai_messages.append({"role": message.role, "content": message.to_text()})
+                openai_messages.append({"role": self.__to_openai_role(message), "content": message.to_text()})
+            # Action results must be sent as separate messages.
             elif message.has_any_content_type(ActionResultMessageContent):
-                # ToolAction results need to be expanded into separate messages.
                 openai_messages.extend(
-                    [
-                        {
-                            "role": self.__to_openai_role(message),
-                            "content": self.__to_openai_message_content(action_result),
-                            "tool_call_id": action_result.action.tag,
-                        }
-                        for action_result in message.get_content_type(ActionResultMessageContent)
-                    ]
-                )
-            else:
-                # ToolAction calls are attached to the assistant message that originally generated them.
-                action_call_content = []
-                non_action_call_content = []
-                for content in message.content:
-                    if isinstance(content, ActionCallMessageContent):
-                        action_call_content.append(content)
-                    else:
-                        non_action_call_content.append(content)
-
-                openai_messages.append(
                     {
-                        "role": self.__to_openai_role(message),
-                        "content": [
-                            self.__to_openai_message_content(content)
-                            for content in non_action_call_content  # ToolAction calls do not belong in the content
-                        ],
-                        **(
-                            {
-                                "tool_calls": [
-                                    self.__to_openai_message_content(action_call) for action_call in action_call_content
-                                ]
-                            }
-                            if action_call_content
-                            else {}
-                        ),
+                        "role": self.__to_openai_role(message, action_result),
+                        "content": self.__to_openai_message_content(action_result),
+                        "tool_call_id": action_result.action.tag,
                     }
+                    for action_result in message.get_content_type(ActionResultMessageContent)
                 )
+
+                if message.has_any_content_type(TextMessageContent):
+                    openai_messages.append({"role": self.__to_openai_role(message), "content": message.to_text()})
+            else:
+                openai_message = {
+                    "role": self.__to_openai_role(message),
+                    "content": [
+                        self.__to_openai_message_content(content)
+                        for content in [
+                            content for content in message.content if not isinstance(content, ActionCallMessageContent)
+                        ]
+                    ],
+                }
+
+                # Action calls must be attached to the message, not sent as content.
+                action_call_content = [
+                    content for content in message.content if isinstance(content, ActionCallMessageContent)
+                ]
+                if action_call_content:
+                    openai_message["tool_calls"] = [
+                        self.__to_openai_message_content(action_call) for action_call in action_call_content
+                    ]
+
+                openai_messages.append(openai_message)
 
         return openai_messages
 
-    def __to_openai_role(self, message: Message) -> str:
+    def __to_openai_role(self, message: Message, message_content: Optional[BaseMessageContent] = None) -> str:
         if message.is_system():
             return "system"
         elif message.is_assistant():
             return "assistant"
         else:
-            if message.has_any_content_type(ActionResultMessageContent):
+            if isinstance(message_content, ActionResultMessageContent):
                 return "tool"
             else:
                 return "user"
@@ -257,11 +260,11 @@ class OpenAiChatPromptDriver(BasePromptDriver):
                                 name=ToolAction.from_native_tool_name(tool_call.function.name)[0],
                                 path=ToolAction.from_native_tool_name(tool_call.function.name)[1],
                                 input=json.loads(tool_call.function.arguments),
-                            )
-                        )
+                            ),
+                        ),
                     )
                     for tool_call in response.tool_calls
-                ]
+                ],
             )
 
         return content

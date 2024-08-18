@@ -28,10 +28,12 @@ class AmazonOpenSearchVectorStoreDriver(OpenSearchVectorStoreDriver):
     http_auth: str | tuple[str, str] = field(
         default=Factory(
             lambda self: import_optional_dependency("opensearchpy").AWSV4SignerAuth(
-                self.session.get_credentials(), self.session.region_name, self.service
+                self.session.get_credentials(),
+                self.session.region_name,
+                self.service,
             ),
             takes_self=True,
-        )
+        ),
     )
 
     client: OpenSearch = field(
@@ -44,12 +46,13 @@ class AmazonOpenSearchVectorStoreDriver(OpenSearchVectorStoreDriver):
                 connection_class=import_optional_dependency("opensearchpy").RequestsHttpConnection,
             ),
             takes_self=True,
-        )
+        ),
     )
 
     def upsert_vector(
         self,
         vector: list[float],
+        *,
         vector_id: Optional[str] = None,
         namespace: Optional[str] = None,
         meta: Optional[dict] = None,
@@ -60,7 +63,7 @@ class AmazonOpenSearchVectorStoreDriver(OpenSearchVectorStoreDriver):
         If a vector with the given vector ID already exists, it is updated; otherwise, a new vector is inserted.
         Metadata associated with the vector can also be provided.
         """
-        vector_id = vector_id if vector_id else str_to_hash(str(vector))
+        vector_id = vector_id or str_to_hash(str(vector))
         doc = {"vector": vector, "namespace": namespace, "metadata": meta}
         doc.update(kwargs)
         if self.service == "aoss":

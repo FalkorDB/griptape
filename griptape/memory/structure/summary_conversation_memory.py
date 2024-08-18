@@ -23,7 +23,8 @@ class SummaryConversationMemory(ConversationMemory):
     summary_index: int = field(default=0, kw_only=True, metadata={"serializable": True})
     summary_template_generator: J2 = field(default=Factory(lambda: J2("memory/conversation/summary.j2")), kw_only=True)
     summarize_conversation_template_generator: J2 = field(
-        default=Factory(lambda: J2("memory/conversation/summarize_conversation.j2")), kw_only=True
+        default=Factory(lambda: J2("memory/conversation/summarize_conversation.j2")),
+        kw_only=True,
     )
 
     @property
@@ -78,11 +79,11 @@ class SummaryConversationMemory(ConversationMemory):
             if len(runs) > 0:
                 summary = self.summarize_conversation_template_generator.render(summary=previous_summary, runs=runs)
                 return self.prompt_driver.run(
-                    prompt_stack=PromptStack(messages=[Message(summary, role=Message.USER_ROLE)])
+                    prompt_stack=PromptStack(messages=[Message(summary, role=Message.USER_ROLE)]),
                 ).to_text()
             else:
                 return previous_summary
         except Exception as e:
-            logging.error(f"Error summarizing memory: {type(e).__name__}({e})")
+            logging.exception("Error summarizing memory: %s(%s)", type(e).__name__, e)
 
             return previous_summary

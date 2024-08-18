@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Optional
 
 import docker
 import stringcase
-from attrs import Factory, define, field
+from attrs import Attribute, Factory, define, field
 from docker.errors import NotFound
 from docker.models.containers import Container
 from schema import Literal, Schema
@@ -36,7 +36,8 @@ class Computer(BaseTool):
         kw_only=True,
     )
     docker_client: DockerClient = field(
-        default=Factory(lambda self: self.default_docker_client(), takes_self=True), kw_only=True
+        default=Factory(lambda self: self.default_docker_client(), takes_self=True),
+        kw_only=True,
     )
 
     _tempdir: Optional[tempfile.TemporaryDirectory] = field(default=None, kw_only=True)
@@ -51,7 +52,7 @@ class Computer(BaseTool):
             self.local_workdir = self._tempdir.name
 
     @docker_client.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_docker_client(self, _, docker_client: DockerClient) -> None:
+    def validate_docker_client(self, _: Attribute, docker_client: DockerClient) -> None:
         if not docker_client:
             raise ValueError("Docker client can't be initialized: make sure the Docker daemon is running")
 
@@ -71,11 +72,12 @@ class Computer(BaseTool):
                 {
                     Literal("code", description="Python code to execute"): str,
                     Literal(
-                        "filename", description="name of the file to put the Python code in before executing it"
+                        "filename",
+                        description="name of the file to put the Python code in before executing it",
                     ): str,
-                }
+                },
             ),
-        }
+        },
     )
     def execute_code(self, params: dict) -> BaseArtifact:
         code = params["values"]["code"]
@@ -87,7 +89,7 @@ class Computer(BaseTool):
         config={
             "description": "Can be used to execute shell commands in Linux",
             "schema": Schema({Literal("command", description="shell command to execute"): str}),
-        }
+        },
     )
     def execute_command(self, params: dict) -> BaseArtifact:
         command = params["values"]["command"]
@@ -96,14 +98,14 @@ class Computer(BaseTool):
 
     def execute_command_in_container(self, command: str) -> BaseArtifact:
         try:
-            binds = {self.local_workdir: {"bind": self.container_workdir, "mode": "rw"}}
+            binds = {self.local_workdir: {"bind": self.container_workdir, "mode": "rw"}} if self.local_workdir else None
 
-            container = self.docker_client.containers.run(
+            container = self.docker_client.containers.run(  # pyright: ignore[reportCallIssue]
                 self.image_name(self),
                 environment=self.env_vars,
                 command=command,
                 name=self.container_name(self),
-                volumes=binds,
+                volumes=binds,  # pyright: ignore[reportArgumentType] According to the [docs](https://docker-py.readthedocs.io/en/stable/containers.html), the type of `volumes` is dict[str, dict[str, str]].
                 stdout=True,
                 stderr=True,
                 detach=True,
@@ -140,8 +142,7 @@ class Computer(BaseTool):
         local_file_path = os.path.join(local_workdir, filename)
 
         try:
-            with open(local_file_path, "w") as f:
-                f.write(code)
+            Path(local_file_path).write_text(code)
 
             return self.execute_command_in_container(f"python {container_file_path}")
         except Exception as e:
@@ -170,7 +171,7 @@ class Computer(BaseTool):
             if isinstance(existing_container, Container):
                 existing_container.remove(force=True)
 
-                logging.info(f"Removed existing container: {name}")
+                logging.info("Removed existing container %s", name)
         except NotFound:
             pass
 
@@ -182,11 +183,11 @@ class Computer(BaseTool):
             image = self.docker_client.images.build(path=temp_dir, tag=self.image_name(tool), rm=True, forcerm=True)
 
             if isinstance(image, tuple):
-                logging.info(f"Built image: {image[0].short_id}")
+                logging.info("Built image: %s", image[0].short_id)
 
     def dependencies(self) -> list[str]:
         with open(self.requirements_txt_path) as file:
-            return [line.strip() for line in file.readlines()]
+            return [line.strip() for line in file]
 
     def __del__(self) -> None:
         if self._tempdir:

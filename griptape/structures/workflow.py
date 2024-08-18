@@ -7,6 +7,7 @@ from attrs import Factory, define, field
 from graphlib import TopologicalSorter
 
 from griptape.artifacts import ErrorArtifact
+from griptape.common import observable
 from griptape.memory.structure import Run
 from griptape.structures import Structure
 
@@ -17,14 +18,22 @@ if TYPE_CHECKING:
 @define
 class Workflow(Structure):
     futures_executor_fn: Callable[[], futures.Executor] = field(
-        default=Factory(lambda: lambda: futures.ThreadPoolExecutor()), kw_only=True
+        default=Factory(lambda: lambda: futures.ThreadPoolExecutor()),
+        kw_only=True,
     )
+
+    @property
+    def input_task(self) -> Optional[BaseTask]:
+        return self.order_tasks()[0] if self.tasks else None
 
     @property
     def output_task(self) -> Optional[BaseTask]:
         return self.order_tasks()[-1] if self.tasks else None
 
     def add_task(self, task: BaseTask) -> BaseTask:
+        if (existing_task := self.try_find_task(task.id)) is not None:
+            return existing_task
+
         task.preprocess(self)
 
         self.tasks.append(task)
@@ -36,6 +45,7 @@ class Workflow(Structure):
         parent_tasks: BaseTask | list[BaseTask],
         tasks: BaseTask | list[BaseTask],
         child_tasks: BaseTask | list[BaseTask],
+        *,
         preserve_relationship: bool = False,
     ) -> list[BaseTask]:
         """Insert tasks between parent and child tasks in the workflow.
@@ -54,7 +64,7 @@ class Workflow(Structure):
             child_tasks = [child_tasks]
 
         for task in tasks:
-            self.insert_task(parent_tasks, task, child_tasks, preserve_relationship)
+            self.insert_task(parent_tasks, task, child_tasks, preserve_relationship=preserve_relationship)
 
         return tasks
 
@@ -63,6 +73,7 @@ class Workflow(Structure):
         parent_tasks: list[BaseTask],
         task: BaseTask,
         child_tasks: list[BaseTask],
+        *,
         preserve_relationship: bool = False,
     ) -> BaseTask:
         task.preprocess(self)
@@ -79,6 +90,7 @@ class Workflow(Structure):
 
         return task
 
+    @observable
     def try_run(self, *args) -> Workflow:
         exit_loop = False
 
@@ -114,7 +126,7 @@ class Workflow(Structure):
                 "parents_output_text": task.parents_output_text,
                 "parents": {parent.id: parent for parent in task.parents},
                 "children": {child.id: child for child in task.children},
-            }
+            },
         )
 
         return context
@@ -143,7 +155,9 @@ class Workflow(Structure):
                 child_task.parent_ids.append(task.id)
 
     def __remove_old_parent_child_relationships(
-        self, parent_tasks: list[BaseTask], child_tasks: list[BaseTask]
+        self,
+        parent_tasks: list[BaseTask],
+        child_tasks: list[BaseTask],
     ) -> None:
         for parent_task in parent_tasks:
             for child_task in child_tasks:

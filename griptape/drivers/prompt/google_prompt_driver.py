@@ -14,12 +14,14 @@ from griptape.common import (
     BaseDeltaMessageContent,
     BaseMessageContent,
     DeltaMessage,
+    GenericMessageContent,
     ImageMessageContent,
     Message,
     PromptStack,
     TextDeltaMessageContent,
     TextMessageContent,
     ToolAction,
+    observable,
 )
 from griptape.drivers import BasePromptDriver
 from griptape.tokenizers import BaseTokenizer, GoogleTokenizer
@@ -50,7 +52,8 @@ class GooglePromptDriver(BasePromptDriver):
     api_key: Optional[str] = field(default=None, kw_only=True, metadata={"serializable": False})
     model: str = field(kw_only=True, metadata={"serializable": True})
     model_client: GenerativeModel = field(
-        default=Factory(lambda self: self._default_model_client(), takes_self=True), kw_only=True
+        default=Factory(lambda self: self._default_model_client(), takes_self=True),
+        kw_only=True,
     )
     tokenizer: BaseTokenizer = field(
         default=Factory(lambda self: GoogleTokenizer(api_key=self.api_key, model=self.model), takes_self=True),
@@ -61,10 +64,12 @@ class GooglePromptDriver(BasePromptDriver):
     use_native_tools: bool = field(default=True, kw_only=True, metadata={"serializable": True})
     tool_choice: str = field(default="auto", kw_only=True, metadata={"serializable": True})
 
+    @observable
     def try_run(self, prompt_stack: PromptStack) -> Message:
         messages = self.__to_google_messages(prompt_stack)
         response: GenerateContentResponse = self.model_client.generate_content(
-            messages, **self._base_params(prompt_stack)
+            messages,
+            **self._base_params(prompt_stack),
         )
 
         usage_metadata = response.usage_metadata
@@ -73,14 +78,18 @@ class GooglePromptDriver(BasePromptDriver):
             content=[self.__to_prompt_stack_message_content(part) for part in response.parts],
             role=Message.ASSISTANT_ROLE,
             usage=Message.Usage(
-                input_tokens=usage_metadata.prompt_token_count, output_tokens=usage_metadata.candidates_token_count
+                input_tokens=usage_metadata.prompt_token_count,
+                output_tokens=usage_metadata.candidates_token_count,
             ),
         )
 
+    @observable
     def try_stream(self, prompt_stack: PromptStack) -> Iterator[DeltaMessage]:
         messages = self.__to_google_messages(prompt_stack)
         response: GenerateContentResponse = self.model_client.generate_content(
-            messages, **self._base_params(prompt_stack), stream=True
+            messages,
+            **self._base_params(prompt_stack),
+            stream=True,
         )
 
         prompt_token_count = None
@@ -100,22 +109,23 @@ class GooglePromptDriver(BasePromptDriver):
                 )
             else:
                 yield DeltaMessage(
-                    content=content, usage=DeltaMessage.Usage(output_tokens=usage_metadata.candidates_token_count)
+                    content=content,
+                    usage=DeltaMessage.Usage(output_tokens=usage_metadata.candidates_token_count),
                 )
 
     def _base_params(self, prompt_stack: PromptStack) -> dict:
-        GenerationConfig = import_optional_dependency("google.generativeai.types").GenerationConfig
-        ContentDict = import_optional_dependency("google.generativeai.types").ContentDict
-        Part = import_optional_dependency("google.generativeai.protos").Part
+        types = import_optional_dependency("google.generativeai.types")
+        protos = import_optional_dependency("google.generativeai.protos")
 
         system_messages = prompt_stack.system_messages
         if system_messages:
-            self.model_client._system_instruction = ContentDict(
-                role="system", parts=[Part(text=system_message.to_text()) for system_message in system_messages]
+            self.model_client._system_instruction = types.ContentDict(
+                role="system",
+                parts=[protos.Part(text=system_message.to_text()) for system_message in system_messages],
             )
 
         return {
-            "generation_config": GenerationConfig(
+            "generation_config": types.GenerationConfig(
                 **{
                     # For some reason, providing stop sequences when streaming breaks native functions
                     # https://github.com/google-gemini/generative-ai-python/issues/446
@@ -124,7 +134,7 @@ class GooglePromptDriver(BasePromptDriver):
                     "temperature": self.temperature,
                     "top_p": self.top_p,
                     "top_k": self.top_k,
-                }
+                },
             ),
             **(
                 {
@@ -143,14 +153,14 @@ class GooglePromptDriver(BasePromptDriver):
         return genai.GenerativeModel(self.model)
 
     def __to_google_messages(self, prompt_stack: PromptStack) -> ContentsType:
-        ContentDict = import_optional_dependency("google.generativeai.types").ContentDict
+        types = import_optional_dependency("google.generativeai.types")
 
         inputs = [
-            ContentDict(
+            types.ContentDict(
                 {
                     "role": self.__to_google_role(message),
                     "parts": [self.__to_google_message_content(content) for content in message.content],
-                }
+                },
             )
             for message in prompt_stack.messages
             if not message.is_system()
@@ -165,7 +175,7 @@ class GooglePromptDriver(BasePromptDriver):
             return "user"
 
     def __to_google_tools(self, tools: list[BaseTool]) -> list[dict]:
-        FunctionDeclaration = import_optional_dependency("google.generativeai.types").FunctionDeclaration
+        types = import_optional_dependency("google.generativeai.types")
 
         tool_declarations = []
         for tool in tools:
@@ -176,7 +186,7 @@ class GooglePromptDriver(BasePromptDriver):
                     schema = schema["properties"]["values"]
 
                 schema = remove_key_in_dict_recursively(schema, "additionalProperties")
-                tool_declaration = FunctionDeclaration(
+                tool_declaration = types.FunctionDeclaration(
                     name=tool.to_native_tool_name(activity),
                     description=tool.activity_description(activity),
                     parameters={
@@ -191,13 +201,13 @@ class GooglePromptDriver(BasePromptDriver):
         return tool_declarations
 
     def __to_google_message_content(self, content: BaseMessageContent) -> ContentDict | Part | str:
-        ContentDict = import_optional_dependency("google.generativeai.types").ContentDict
+        types = import_optional_dependency("google.generativeai.types")
         protos = import_optional_dependency("google.generativeai.protos")
 
         if isinstance(content, TextMessageContent):
             return content.artifact.to_text()
         elif isinstance(content, ImageMessageContent):
-            return ContentDict(mime_type=content.artifact.mime_type, data=content.artifact.value)
+            return types.ContentDict(mime_type=content.artifact.mime_type, data=content.artifact.value)
         elif isinstance(content, ActionCallMessageContent):
             action = content.artifact.value
 
@@ -207,10 +217,12 @@ class GooglePromptDriver(BasePromptDriver):
 
             return protos.Part(
                 function_response=protos.FunctionResponse(
-                    name=content.action.to_native_tool_name(), response=artifact.to_dict()
-                )
+                    name=content.action.to_native_tool_name(),
+                    response=artifact.to_dict(),
+                ),
             )
-
+        elif isinstance(content, GenericMessageContent):
+            return content.artifact.value
         else:
             raise ValueError(f"Unsupported prompt stack content type: {type(content)}")
 
@@ -222,9 +234,9 @@ class GooglePromptDriver(BasePromptDriver):
 
             name, path = ToolAction.from_native_tool_name(function_call.name)
 
-            args = {k: v for k, v in function_call.args.items()}
+            args = dict(function_call.args.items())
             return ActionCallMessageContent(
-                artifact=ActionArtifact(value=ToolAction(tag=function_call.name, name=name, path=path, input=args))
+                artifact=ActionArtifact(value=ToolAction(tag=function_call.name, name=name, path=path, input=args)),
             )
         else:
             raise ValueError(f"Unsupported message content type {content}")
@@ -237,9 +249,12 @@ class GooglePromptDriver(BasePromptDriver):
 
             name, path = ToolAction.from_native_tool_name(function_call.name)
 
-            args = {k: v for k, v in function_call.args.items()}
+            args = dict(function_call.args.items())
             return ActionCallDeltaMessageContent(
-                tag=function_call.name, name=name, path=path, partial_input=json.dumps(args)
+                tag=function_call.name,
+                name=name,
+                path=path,
+                partial_input=json.dumps(args),
             )
         else:
             raise ValueError(f"Unsupported message content type {content}")

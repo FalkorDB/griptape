@@ -4,13 +4,10 @@ from queue import Queue
 from threading import Thread
 from typing import TYPE_CHECKING
 
-from attrs import Factory, define, field
+from attrs import Attribute, Factory, define, field
 
 from griptape.artifacts.text_artifact import TextArtifact
-from griptape.events.completion_chunk_event import CompletionChunkEvent
-from griptape.events.event_listener import EventListener
-from griptape.events.finish_prompt_event import FinishPromptEvent
-from griptape.events.finish_structure_run_event import FinishStructureRunEvent
+from griptape.events import CompletionChunkEvent, EventListener, FinishPromptEvent, FinishStructureRunEvent, event_bus
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -36,8 +33,8 @@ class Stream:
     structure: Structure = field()
 
     @structure.validator  # pyright: ignore[reportAttributeAccessIssue]
-    def validate_structure(self, _, structure: Structure):
-        if structure and not structure.config.prompt_driver.stream:
+    def validate_structure(self, _: Attribute, structure: Structure) -> None:
+        if not structure.config.prompt_driver.stream:
             raise ValueError("prompt driver does not have streaming enabled, enable with stream=True")
 
     _event_queue: Queue[BaseEvent] = field(default=Factory(lambda: Queue()))
@@ -56,15 +53,16 @@ class Stream:
                 yield TextArtifact(value=event.token)
         t.join()
 
-    def _run_structure(self, *args):
-        def event_handler(event: BaseEvent):
+    def _run_structure(self, *args) -> None:
+        def event_handler(event: BaseEvent) -> None:
             self._event_queue.put(event)
 
         stream_event_listener = EventListener(
-            handler=event_handler, event_types=[CompletionChunkEvent, FinishPromptEvent, FinishStructureRunEvent]
+            handler=event_handler,
+            event_types=[CompletionChunkEvent, FinishPromptEvent, FinishStructureRunEvent],
         )
-        self.structure.add_event_listener(stream_event_listener)
+        event_bus.add_event_listener(stream_event_listener)
 
         self.structure.run(*args)
 
-        self.structure.remove_event_listener(stream_event_listener)
+        event_bus.remove_event_listener(stream_event_listener)

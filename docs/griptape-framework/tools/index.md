@@ -1,27 +1,21 @@
+---
+search:
+  boost: 2 
+---
+
 ## Overview
 
 One of the most powerful features of Griptape is the ability to use tools that can interact with the outside world.
-Many of our [Prompt Drivers](../drivers/prompt-drivers.md) leverage the native function calling built into the LLMs. For LLMs that don't support this, Griptape provides its own implementation using the [ReAct](https://arxiv.org/abs/2210.03629) technique.
+Many of our [Prompt Drivers](../drivers/prompt-drivers.md) leverage the native function calling built into the LLMs. 
+For LLMs that don't support this, Griptape provides its own implementation using the [ReAct](https://arxiv.org/abs/2210.03629) technique. 
+
+You can switch between the two strategies by setting `use_native_tools` to `True` (LLM-native tool calling) or `False` (Griptape tool calling) on your [Prompt Driver][../drivers/prompt-drivers.md].
 
 ## Tools
 Here is an example of a Pipeline using Tools: 
 
 ```python
-from griptape.tasks import ToolkitTask
-from griptape.structures import Pipeline
-from griptape.tools import WebScraper, FileManager, TaskMemoryClient
-
-
-pipeline = Pipeline()
-
-pipeline.add_tasks(
-    ToolkitTask(
-        "Load https://www.griptape.ai, summarize it, and store it in a file called griptape.txt", 
-        tools=[WebScraper(off_prompt=True), FileManager(off_prompt=True), TaskMemoryClient(off_prompt=False)]
-    ),
-)
-
-pipeline.run()
+--8<-- "docs/griptape-framework/tools/src/index_1.py"
 ```
 
 ```

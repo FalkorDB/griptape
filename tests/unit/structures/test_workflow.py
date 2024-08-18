@@ -1,20 +1,20 @@
 import time
+
 import pytest
 
-from pytest import fixture
-from griptape.memory.task.storage import TextArtifactStorage
-from tests.mocks.mock_prompt_driver import MockPromptDriver
-from griptape.rules import Rule, Ruleset
-from griptape.tasks import PromptTask, BaseTask, ToolkitTask, CodeExecutionTask
-from griptape.structures import Workflow
 from griptape.artifacts import ErrorArtifact, TextArtifact
 from griptape.memory.structure import ConversationMemory
-from tests.mocks.mock_tool.tool import MockTool
+from griptape.memory.task.storage import TextArtifactStorage
+from griptape.rules import Rule, Ruleset
+from griptape.structures import Workflow
+from griptape.tasks import BaseTask, CodeExecutionTask, PromptTask, ToolkitTask
 from tests.mocks.mock_embedding_driver import MockEmbeddingDriver
+from tests.mocks.mock_prompt_driver import MockPromptDriver
+from tests.mocks.mock_tool.tool import MockTool
 
 
 class TestWorkflow:
-    @fixture
+    @pytest.fixture()
     def waiting_task(self):
         def fn(task):
             time.sleep(2)
@@ -22,7 +22,7 @@ class TestWorkflow:
 
         return CodeExecutionTask(run_fn=fn)
 
-    @fixture
+    @pytest.fixture()
     def error_artifact_task(self):
         def fn(task):
             return ErrorArtifact("error")
@@ -75,8 +75,8 @@ class TestWorkflow:
         with pytest.raises(ValueError):
             Workflow(rules=[Rule("foo test")], rulesets=[Ruleset("Bar", [Rule("bar test")])])
 
+        workflow = Workflow()
         with pytest.raises(ValueError):
-            workflow = Workflow()
             workflow.add_task(PromptTask(rules=[Rule("foo test")], rulesets=[Ruleset("Bar", [Rule("bar test")])]))
 
     def test_with_no_task_memory(self):
@@ -316,6 +316,34 @@ class TestWorkflow:
         task2.add_child(task4)
         task3.add_child(task4)
         workflow = Workflow(prompt_driver=MockPromptDriver(), tasks=[task1, task2, task3, task4])
+
+        workflow.run()
+
+        self._validate_topology_1(workflow)
+
+    def test_run_topology_1_imperative_parents_structure_init(self):
+        workflow = Workflow(prompt_driver=MockPromptDriver())
+        task1 = PromptTask("test1", id="task1")
+        task2 = PromptTask("test2", id="task2", structure=workflow)
+        task3 = PromptTask("test3", id="task3", structure=workflow)
+        task4 = PromptTask("test4", id="task4", structure=workflow)
+        task2.add_parent(task1)
+        task3.add_parent("task1")
+        task4.add_parents([task2, "task3"])
+
+        workflow.run()
+
+        self._validate_topology_1(workflow)
+
+    def test_run_topology_1_imperative_children_structure_init(self):
+        workflow = Workflow(prompt_driver=MockPromptDriver())
+        task1 = PromptTask("test1", id="task1", structure=workflow)
+        task2 = PromptTask("test2", id="task2", structure=workflow)
+        task3 = PromptTask("test3", id="task3", structure=workflow)
+        task4 = PromptTask("test4", id="task4")
+        task1.add_children([task2, task3])
+        task2.add_child(task4)
+        task3.add_child(task4)
 
         workflow.run()
 
@@ -777,12 +805,12 @@ class TestWorkflow:
         assert workflow.output is not None
 
     @staticmethod
-    def _validate_topology_1(workflow):
+    def _validate_topology_1(workflow) -> None:
         assert len(workflow.tasks) == 4
         assert workflow.input_task.id == "task1"
         assert workflow.output_task.id == "task4"
-        assert workflow.input_task.id == workflow.tasks[0].id
-        assert workflow.output_task.id == workflow.tasks[-1].id
+        assert workflow.input_task.id == workflow.order_tasks()[0].id
+        assert workflow.output_task.id == workflow.order_tasks()[-1].id
 
         task1 = workflow.find_task("task1")
         assert task1.state == BaseTask.State.FINISHED
@@ -805,13 +833,11 @@ class TestWorkflow:
         assert task4.child_ids == []
 
     @staticmethod
-    def _validate_topology_2(workflow):
-        """Adapted from https://en.wikipedia.org/wiki/Directed_acyclic_graph#/media/File:Tred-G.svg"""
+    def _validate_topology_2(workflow) -> None:
+        """Adapted from https://en.wikipedia.org/wiki/Directed_acyclic_graph#/media/File:Tred-G.svg."""
         assert len(workflow.tasks) == 5
         assert workflow.input_task.id == "taska"
         assert workflow.output_task.id == "taske"
-        assert workflow.input_task.id == workflow.tasks[0].id
-        assert workflow.output_task.id == workflow.tasks[-1].id
 
         taska = workflow.find_task("taska")
         assert taska.state == BaseTask.State.FINISHED
@@ -832,6 +858,8 @@ class TestWorkflow:
         assert taskd.state == BaseTask.State.FINISHED
         assert sorted(taskd.parent_ids) == ["taska", "taskb", "taskc"]
         assert taskd.child_ids == ["taske"]
+        assert workflow.input_task.id == workflow.order_tasks()[0].id
+        assert workflow.output_task.id == workflow.order_tasks()[-1].id
 
         taske = workflow.find_task("taske")
         assert taske.state == BaseTask.State.FINISHED
@@ -839,13 +867,10 @@ class TestWorkflow:
         assert taske.child_ids == []
 
     @staticmethod
-    def _validate_topology_3(workflow):
+    def _validate_topology_3(workflow) -> None:
         assert len(workflow.tasks) == 4
         assert workflow.input_task.id == "task1"
         assert workflow.output_task.id == "task3"
-        assert workflow.input_task.id == workflow.tasks[0].id
-        assert workflow.output_task.id == workflow.tasks[-1].id
-
         task1 = workflow.find_task("task1")
         assert task1.state == BaseTask.State.FINISHED
         assert task1.parent_ids == []
@@ -855,6 +880,8 @@ class TestWorkflow:
         assert task2.state == BaseTask.State.FINISHED
         assert task2.parent_ids == ["task4"]
         assert task2.child_ids == ["task3"]
+        assert workflow.input_task.id == workflow.order_tasks()[0].id
+        assert workflow.output_task.id == workflow.order_tasks()[-1].id
 
         task3 = workflow.find_task("task3")
         assert task3.state == BaseTask.State.FINISHED
@@ -867,12 +894,12 @@ class TestWorkflow:
         assert task4.child_ids == ["task2"]
 
     @staticmethod
-    def _validate_topology_4(workflow):
+    def _validate_topology_4(workflow) -> None:
         assert len(workflow.tasks) == 9
         assert workflow.input_task.id == "collect_movie_info"
         assert workflow.output_task.id == "summarize_to_slack"
-        assert workflow.input_task.id == workflow.tasks[0].id
-        assert workflow.output_task.id == workflow.tasks[-1].id
+        assert workflow.input_task.id == workflow.order_tasks()[0].id
+        assert workflow.output_task.id == workflow.order_tasks()[-1].id
 
         collect_movie_info = workflow.find_task("collect_movie_info")
         assert collect_movie_info.parent_ids == []

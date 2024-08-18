@@ -1,10 +1,11 @@
 import pytest
-from schema import Schema, Literal, Optional
+from schema import Literal, Optional, Schema
+
 from tests.mocks.mock_tool.tool import MockTool
 
 
 class TestActivityMixin:
-    @pytest.fixture
+    @pytest.fixture()
     def tool(self):
         return MockTool(test_field="hello", test_int=5)
 
@@ -19,7 +20,7 @@ class TestActivityMixin:
     def test_activity_schema(self, tool):
         schema = tool.activity_schema(tool.test).json_schema("InputSchema")
 
-        assert schema == Schema({"values": tool.test.config["schema"].schema}).json_schema("InputSchema")
+        assert schema == Schema({"values": getattr(tool.test, "config")["schema"]}).json_schema("InputSchema")
         assert schema["properties"].get("artifact") is None
 
     def test_activity_with_no_schema(self, tool):
@@ -72,11 +73,31 @@ class TestActivityMixin:
 
         assert len(tool.activities()) > 0
 
-    def test_activity_to_input(self, tool):
-        input = tool.activity_to_input(tool.test)
-        assert str(input) == str(
-            {Literal("input", description=""): {"values": Schema({Literal("test"): str}, description="Test input")}}
+    def test_extra_schema_properties(self):
+        tool = MockTool(
+            test_field="hello",
+            test_int=5,
+            extra_schema_properties={"test": {Literal("new_property"): str, Optional("optional_property"): int}},
         )
+        schema = tool.activity_schema(tool.test).json_schema("InputSchema")
 
-        input = tool.activity_to_input(tool.test_no_schema)
-        assert input == {Optional("input"): {}}
+        assert schema == {
+            "$id": "InputSchema",
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "properties": {
+                "values": {
+                    "description": "Test input",
+                    "properties": {
+                        "test": {"type": "string"},
+                        "new_property": {"type": "string"},
+                        "optional_property": {"type": "integer"},
+                    },
+                    "required": ["test", "new_property"],
+                    "additionalProperties": False,
+                    "type": "object",
+                }
+            },
+            "required": ["values"],
+            "additionalProperties": False,
+            "type": "object",
+        }
